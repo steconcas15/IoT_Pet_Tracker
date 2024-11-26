@@ -21,15 +21,11 @@ class FlaskServer:
         connection_string = ConfigLoader.build_connection_string(db_config)
         # Initialize SchemaRegistry
         schema_registry = SchemaRegistry()
-        #### PUT HERE YOUR TEMPLATES!!!! ########
-        #Example
-        #schema_registry.load_schema('room', 'src/virtualization/templates/room.yaml')
-        ########################################################################################################
         # Initialize DatabaseService with configuration
         db_service = DatabaseService(
             connection_string=connection_string,
             db_name=db_config["settings"]["name"],
-            schema_registry=schema_registry
+            schema_registry=schema_registry,
         )
         db_service.connect()
 
@@ -37,9 +33,9 @@ class FlaskServer:
         dt_factory = DTFactory(db_service, schema_registry)
 
         # Store references
-        self.app.config['SCHEMA_REGISTRY'] = schema_registry
-        self.app.config['DB_SERVICE'] = db_service
-        self.app.config['DT_FACTORY'] = dt_factory
+        self.app.config["SCHEMA_REGISTRY"] = schema_registry
+        self.app.config["DB_SERVICE"] = db_service
+        self.app.config["DT_FACTORY"] = dt_factory
 
         # Store DTFactory reference in db_service for API access
         db_service.dt_factory = dt_factory
@@ -48,16 +44,16 @@ class FlaskServer:
         """Register all API blueprints"""
         register_api_blueprints(self.app)
 
-    def run(self, host='0.0.0.0', port=5000, debug=True):
+    def run(self, host="0.0.0.0", port=5000, debug=True):
         """Run the Flask server"""
         try:
             self.app.run(host=host, port=port, debug=debug)
         finally:
             # Cleanup on server shutdown
-            if 'DB_SERVICE' in self.app.config:
-                self.app.config['DB_SERVICE'].disconnect()
+            if "DB_SERVICE" in self.app.config:
+                self.app.config["DB_SERVICE"].disconnect()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     server = FlaskServer()
     server.run()
