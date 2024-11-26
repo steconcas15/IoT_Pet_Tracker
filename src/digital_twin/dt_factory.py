@@ -1,384 +1,192 @@
-from typing import Dict, List, Optional
+import yaml
 from datetime import datetime
-from bson import ObjectId
-from src.services.database_service import DatabaseService
-from src.virtualization.digital_replica.schema_registry import SchemaRegistry
-from src.digital_twin.core import DigitalTwin
-
-class DTFactory:
-    """Factory class for creating and managing Digital Twins"""
-
-    def __init__(self, db_service: DatabaseService, schema_registry: SchemaRegistry):
-        self.db_service = db_service
-        self.schema_registry = schema_registry
-        self._init_dt_collection()
+from typing import Dict, Any
+import uuid
 
 
-    def create_dt(self, name: str, description: str = "") -> str:
-        """
-        Create a new Digital Twin
+class DRFactory:
+    def __init__(self, schema_path: str):
+        self.schema = self._load_schema(schema_path)
+        if not self.schema or "schemas" not in self.schema:
+            raise ValueError(f"Invalid schema structure in {schema_path}")
 
-        Args:
-            name: Name of the Digital Twin
-            description: Optional description
+    def _load_schema(self, path: str) -> Dict:
+        try:
+            with open(path, "r") as file:
+                return yaml.safe_load(file)
+        except Exception as e:
+            raise ValueError(f"Failed to load schema: {str(e)}")
 
-        Returns:
-            str: ID of the created Digital Twin
-        """
-        dt_data = {
-            "_id": str(ObjectId()),
-            "name": name,
-            "description": description,
-            "digital_replicas": [],  # List of DR references
-            "services": [],  # List of service references
+    def create_dr(self, dr_type: str, initial_data: Dict[str, Any]) -> Dict:
+        """Create a Digital Replica based on schema definition"""
+        if not self.schema:
+            raise ValueError("No schema loaded")
+
+        # Initialize base structure with required fields
+        dr = {
+            "_id": str(uuid.uuid4()),
+            "type": dr_type,  # IMPORTANTE: Questo è il tipo!
             "metadata": {
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
-                "status": "active"
-            }
+                "privacy_level": initial_data.get("metadata", {}).get(
+                    "privacy_level", "private"
+                ),
+            },
         }
 
-        try:
-            dt_collection = self.db_service.db["digital_twins"]
-            result = dt_collection.insert_one(dt_data)
-            return str(result.inserted_id)
-        except Exception as e:
-            raise Exception(f"Failed to create Digital Twin: {str(e)}")
+        # Processa i campi dal profilo
+        if "profile" in initial_data:
+            dr["profile"] = initial_data["profile"].copy()
 
-    def add_digital_replica(self, dt_id: str, dr_type: str, dr_id: str) -> None:
-        """
-        Add a Digital Replica reference to a Digital Twin
+        # Processa i campi dai dati
+        if "data" in initial_data:
+            dr["data"] = initial_data["data"].copy()
+        else:
+            dr["data"] = {}
 
-        Args:
-            dt_id: Digital Twin ID
-            dr_type: Type of Digital Replica
-            dr_id: Digital Replica ID
-        """
-        try:
-            dt_collection = self.db_service.db["digital_twins"]
+        # Assicurati che ci siano i campi obbligatori nei dati
+        if "status" not in dr["data"]:
+            dr["data"]["status"] = "active"
+        if "measurements" not in dr["data"]:
+            dr["data"]["measurements"] = []
+        if "properties" not in dr["data"]:
+            dr["data"]["properties"] = {}
+        if "relations" not in dr["data"]:
+            dr["data"]["relations"] = {}
 
-            # Verify DR exists
-            dr = self.db_service.get_dr(dr_type, dr_id)
-            if not dr:
-                raise ValueError(f"Digital Replica not found: {dr_id}")
+        print(f"\n=== Debug: Created DR ===")
+        print(f"Type: {dr['type']}")  # Verifica che il tipo sia settato
+        print(f"ID: {dr['_id']}")
+        print(f"Data: {dr['data']}")
 
-            # Add DR reference
-            dt_collection.update_one(
-                {"_id": dt_id},
-                {
-                    "$push": {
-                        "digital_replicas": {
-                            "type": dr_type,
-                            "id": dr_id
-                        }
-                    },
-                    "$set": {
-                        "metadata.updated_at": datetime.utcnow()
-                    }
-                }
-            )
-        except Exception as e:
-            raise Exception(f"Failed to add Digital Replica: {str(e)}")
+        return dr
 
-    def _get_service_module_mapping(self) -> Dict[str, str]:
-        """
-        Returns a mapping of service names to their module paths
-        """
-        return {
-            'AggregationService': 'src.services.analytics',
-            # Aggiungere qui altri servizi secondo necessità
+    def _process_section(
+        self, dr: Dict, initial_data: Dict, section_schema: Dict
+    ) -> None:
+        """Process a schema section and apply it to the DR"""
+        for field, field_def in section_schema.items():
+            # Handle nested fields (like profile, data, metadata)
+            if isinstance(field_def, dict):
+                if field not in dr:
+                    dr[field] = {}
+
+                # Get initial data for this field
+                source_data = initial_data.get(field, {})
+
+                # Process each subfield
+                for subfield, subfield_type in field_def.items():
+                    value = source_data.get(subfield)
+
+                    # If value not provided, initialize based on type
+                    if value is None:
+                        value = self._get_default_value(subfield_type)
+
+                    dr[field][subfield] = value
+            else:
+                # Handle direct fields
+                value = initial_data.get(field)
+                if value is None:
+                    value = self._get_default_value(field_def)
+                dr[field] = value
+
+    def _get_default_value(self, type_def: str) -> Any:
+        """Get default value based on type"""
+        if isinstance(type_def, list):
+            return []
+        if type_def == "Dict":
+            return {}
+        if type_def == "List[Dict]":
+            return []
+        if type_def == "datetime":
+            return datetime.utcnow()
+        if type_def == "str":
+            return ""
+        if type_def == "int":
+            return 0
+        if type_def == "float":
+            return 0.0
+        if type_def == "bool":
+            return False
+        return None
+
+    def _validate_against_schema(self, dr: Dict, validations: Dict) -> None:
+        """Validate DR against schema validations"""
+        # Check required fields
+        if "required" in validations:
+            missing = [
+                field
+                for field in validations["required"]
+                if field not in dr or dr[field] is None
+            ]
+            if missing:
+                raise ValueError(f"Missing required fields: {missing}")
+
+        # Check field properties
+        if "properties" in validations:
+            for field, rules in validations["properties"].items():
+                if field not in dr:
+                    continue
+
+                value = dr[field]
+
+                # Check required subfields
+                if "required" in rules:
+                    if not isinstance(value, dict):
+                        raise ValueError(f"Field {field} must be an object")
+                    missing = [
+                        subfield
+                        for subfield in rules["required"]
+                        if subfield not in value or value[subfield] is None
+                    ]
+                    if missing:
+                        raise ValueError(
+                            f"Missing required subfields in {field}: {missing}"
+                        )
+
+                # Validate field properties
+                if "properties" in rules:
+                    for subfield, subrules in rules["properties"].items():
+                        if subfield not in value:
+                            continue
+
+                        subvalue = value[subfield]
+
+                        # Type validation
+                        if "type" in subrules:
+                            self._validate_type(
+                                subvalue, subrules["type"], f"{field}.{subfield}"
+                            )
+
+                        # Range validation
+                        if "minimum" in subrules and subvalue < subrules["minimum"]:
+                            raise ValueError(
+                                f"{field}.{subfield} must be >= {subrules['minimum']}"
+                            )
+                        if "maximum" in subrules and subvalue > subrules["maximum"]:
+                            raise ValueError(
+                                f"{field}.{subfield} must be <= {subrules['maximum']}"
+                            )
+
+                        # Enum validation
+                        if "enum" in subrules and subvalue not in subrules["enum"]:
+                            raise ValueError(
+                                f"{field}.{subfield} must be one of {subrules['enum']}"
+                            )
+
+    def _validate_type(self, value: Any, expected_type: str, field_path: str) -> None:
+        """Validate value against expected type"""
+        type_mapping = {
+            "string": str,
+            "number": (int, float),
+            "integer": int,
+            "boolean": bool,
+            "array": list,
+            "object": dict,
         }
 
-    def add_service(self, dt_id: str, service_name: str, service_config: Dict = None) -> None:
-        """
-        Add a service reference to a Digital Twin
-
-        Args:
-            dt_id: Digital Twin ID
-            service_name: Name of the service
-            service_config: Optional service configuration
-        """
-        try:
-            dt_collection = self.db_service.db["digital_twins"]
-
-            # Ottieni il mapping dei moduli
-            module_mapping = self._get_service_module_mapping()
-
-            # Usa il mapping per trovare il modulo corretto
-            if service_name not in module_mapping:
-                raise ValueError(f"Service {service_name} not configured in module mapping")
-
-            module_name = module_mapping[service_name]
-
-            try:
-                service_module = __import__(module_name, fromlist=[service_name])
-                service_class = getattr(service_module, service_name)
-
-                # Verifica che il servizio esista prima di aggiungerlo
-                service = service_class()
-
-                service_data = {
-                    "name": service_name,
-                    "config": service_config or {},
-                    "status": "active",
-                    "added_at": datetime.utcnow()
-                }
-
-                dt_collection.update_one(
-                    {"_id": dt_id},
-                    {
-                        "$push": {
-                            "services": service_data
-                        },
-                        "$set": {
-                            "metadata.updated_at": datetime.utcnow()
-                        }
-                    }
-                )
-            except (ImportError, AttributeError) as e:
-                raise ValueError(f"Failed to load service {service_name} from module {module_name}: {str(e)}")
-
-
-        except Exception as e:
-            raise Exception(f"Failed to add service: {str(e)}")
-
-    def get_dt(self, dt_id: str) -> Optional[Dict]:
-        """
-        Get a Digital Twin by ID
-
-        Args:
-            dt_id: Digital Twin ID
-
-        Returns:
-            Dict: Digital Twin data if found, None otherwise
-        """
-        try:
-            dt_collection = self.db_service.db["digital_twins"]
-            return dt_collection.find_one({"_id": dt_id})
-        except Exception as e:
-            raise Exception(f"Failed to get Digital Twin: {str(e)}")
-
-    # def get_dt_by_name(self, name: str) -> Optional[Dict]:
-    #     """
-    #     Get a Digital Twin by name
-    #
-    #     Args:
-    #         name: Digital Twin name
-    #
-    #     Returns:
-    #         Dict: Digital Twin data if found, None otherwise
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #         return dt_collection.find_one({"name": name})
-    #     except Exception as e:
-    #         raise Exception(f"Failed to get Digital Twin: {str(e)}")
-
-    def list_dts(self) -> List[Dict]:
-        """
-        List all Digital Twins
-
-        Returns:
-            List[Dict]: List of Digital Twins
-        """
-        try:
-            dt_collection = self.db_service.db["digital_twins"]
-            return list(dt_collection.find())
-        except Exception as e:
-            raise Exception(f"Failed to list Digital Twins: {str(e)}")
-
-    # def update_dt(self, dt_id: str, update_data: Dict) -> None:
-    #     """
-    #     Update a Digital Twin
-    #
-    #     Args:
-    #         dt_id: Digital Twin ID
-    #         update_data: Data to update
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #
-    #         # Ensure metadata.updated_at is set
-    #         if "metadata" not in update_data:
-    #             update_data["metadata"] = {}
-    #         update_data["metadata"]["updated_at"] = datetime.utcnow()
-    #
-    #         result = dt_collection.update_one(
-    #             {"_id": dt_id},
-    #             {"$set": update_data}
-    #         )
-    #
-    #         if result.matched_count == 0:
-    #             raise ValueError(f"Digital Twin not found: {dt_id}")
-    #
-    #     except Exception as e:
-    #         raise Exception(f"Failed to update Digital Twin: {str(e)}")
-
-    # def delete_dt(self, dt_id: str) -> None:
-    #     """
-    #     Delete a Digital Twin
-    #
-    #     Args:
-    #         dt_id: Digital Twin ID
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #         result = dt_collection.delete_one({"_id": dt_id})
-    #
-    #         if result.deleted_count == 0:
-    #             raise ValueError(f"Digital Twin not found: {dt_id}")
-    #
-    #     except Exception as e:
-    #         raise Exception(f"Failed to delete Digital Twin: {str(e)}")
-
-    # def remove_digital_replica(self, dt_id: str, dr_id: str) -> None:
-    #     """
-    #     Remove a Digital Replica reference from a Digital Twin
-    #
-    #     Args:
-    #         dt_id: Digital Twin ID
-    #         dr_id: Digital Replica ID
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #
-    #         dt_collection.update_one(
-    #             {"_id": dt_id},
-    #             {
-    #                 "$pull": {
-    #                     "digital_replicas": {
-    #                         "id": dr_id
-    #                     }
-    #                 },
-    #                 "$set": {
-    #                     "metadata.updated_at": datetime.utcnow()
-    #                 }
-    #             }
-    #         )
-    #     except Exception as e:
-    #         raise Exception(f"Failed to remove Digital Replica: {str(e)}")
-
-    # def remove_service(self, dt_id: str, service_name: str) -> None:
-    #     """
-    #     Remove a service reference from a Digital Twin
-    #
-    #     Args:
-    #         dt_id: Digital Twin ID
-    #         service_name: Name of the service to remove
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #
-    #         dt_collection.update_one(
-    #             {"_id": dt_id},
-    #             {
-    #                 "$pull": {
-    #                     "services": {
-    #                         "name": service_name
-    #                     }
-    #                 },
-    #                 "$set": {
-    #                     "metadata.updated_at": datetime.utcnow()
-    #                 }
-    #             }
-    #         )
-    #     except Exception as e:
-    #         raise Exception(f"Failed to remove service: {str(e)}")
-
-    def _init_dt_collection(self) -> None:
-        """Initialize the Digital Twin collection in MongoDB"""
-        if not self.db_service.is_connected():
-            raise ConnectionError("Database service not connected")
-
-        try:
-            db = self.db_service.db
-            if "digital_twins" not in db.list_collection_names():
-                db.create_collection("digital_twins")
-                dt_collection = db["digital_twins"]
-                dt_collection.create_index("name", unique=True)
-                dt_collection.create_index("metadata.created_at")
-                dt_collection.create_index("metadata.updated_at")
-        except Exception as e:
-            raise Exception(f"Failed to initialize DT collection: {str(e)}")
-
-    def create_dt_from_data(self, dt_data: dict) -> DigitalTwin:
-        """
-        Create a DigitalTwin instance from database data with enhanced debugging
-        """
-        print("\n=== Creating DT Instance ===")
-        try:
-            # Create new DT instance
-            dt = DigitalTwin()
-            print(f"Created new DT instance for {dt_data.get('name', 'unnamed')}")
-
-            # Add Digital Replicas
-            for dr_ref in dt_data.get('digital_replicas', []):
-                dr = self.db_service.get_dr(dr_ref['type'], dr_ref['id'])
-                if dr:
-                    dt.add_digital_replica(dr)
-                    print(f"Added DR: {dr_ref['type']} - {dr_ref['id']}")
-
-            # Add Services
-            print("\nLoading services...")
-            service_mapping = self._get_service_module_mapping()
-            print(f"Service mapping: {service_mapping}")
-
-            for service_data in dt_data.get('services', []):
-                service_name = service_data['name']
-                print(f"\nProcessing service: {service_name}")
-
-                if service_name in service_mapping:
-                    try:
-                        module_name = service_mapping[service_name]
-                        print(f"Loading module: {module_name}")
-
-                        service_module = __import__(module_name, fromlist=[service_name])
-                        print(f"Module loaded successfully")
-
-                        service_class = getattr(service_module, service_name)
-                        print(f"Got service class: {service_class}")
-
-                        service = service_class()
-                        print(f"Service instance created")
-
-                        if hasattr(service, 'configure') and 'config' in service_data:
-                            service.configure(service_data['config'])
-                            print(f"Service configured with: {service_data['config']}")
-
-                        dt.add_service(service)
-                        print(f"Service added to DT")
-                        print(f"Current DT services: {dt.list_services()}")
-                    except Exception as e:
-                        print(f"Error adding service {service_name}: {str(e)}")
-                        print(f"Exception type: {type(e)}")
-                else:
-                    print(f"Warning: Service {service_name} not found in mapping")
-
-            return dt
-
-        except Exception as e:
-            print(f"Error creating DT: {str(e)}")
-            print(f"Exception type: {type(e)}")
-            raise Exception(f"Failed to create DT from data: {str(e)}")
-
-    def get_dt_instance(self, dt_id: str) -> Optional[DigitalTwin]:
-        """
-        Get a fully initialized DigitalTwin instance by ID
-
-        Args:
-            dt_id: Digital Twin ID
-
-        Returns:
-            Optional[DigitalTwin]: Digital Twin instance if found, None otherwise
-        """
-        try:
-            # Get DT data from database
-            dt_data = self.get_dt(dt_id)
-            if not dt_data:
-                return None
-
-            # Create and return DT instance
-            return self.create_dt_from_data(dt_data)
-
-        except Exception as e:
-            raise Exception(f"Failed to get DT instance: {str(e)}")
+        if expected_type in type_mapping:
+            expected_class = type_mapping[expected_type]
+            if not isinstance(value, expected_class):
+                raise ValueError(f"{field_path} must be of type {expected_type}")

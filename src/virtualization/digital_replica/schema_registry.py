@@ -3,126 +3,94 @@ import yaml
 
 
 class SchemaRegistry:
-    """
-    A simplified schema registry that loads and maintains validation schemas.
-    The registry accepts any YAML schema and converts it to MongoDB validation rules.
-    """
-
     def __init__(self):
         self.schemas = {}
 
     def load_schema(self, schema_type: str, yaml_path: str) -> None:
-        """
-        Load a schema from a YAML file and store it in the registry
-
-        Args:
-            schema_type: Type identifier for the schema
-            yaml_path: Path to the YAML schema file
-        """
+        """Load schema from YAML file"""
         try:
-            # Load the YAML file
             with open(yaml_path, "r") as file:
                 raw_schema = yaml.safe_load(file)
 
-            if not raw_schema:
-                raise ValueError(f"Empty or invalid schema file: {yaml_path}")
+            if not raw_schema or "schemas" not in raw_schema:
+                raise ValueError(f"Invalid schema structure in {yaml_path}")
 
-            # Convert the raw schema to MongoDB validation format
-            validation_schema = self._create_validation_schema(raw_schema)
+            # Convert YAML schema to MongoDB validation schema
+            validation_schema = self._convert_yaml_to_mongodb_schema(
+                raw_schema["schemas"]
+            )
             self.schemas[schema_type] = validation_schema
 
-        except FileNotFoundError:
-            raise ValueError(f"Schema file not found: {yaml_path}")
         except Exception as e:
             raise ValueError(f"Failed to load schema from {yaml_path}: {str(e)}")
 
-    def _create_validation_schema(self, raw_schema: Dict) -> Dict:
-        """
-        Convert a raw schema into MongoDB validation format
+    def _convert_yaml_to_mongodb_schema(self, yaml_schema: Dict) -> Dict:
+        """Convert YAML schema format to MongoDB $jsonSchema format"""
 
-        Args:
-            raw_schema: The raw schema loaded from YAML
+        def convert_type(yaml_type: str) -> str:
+            """Convert YAML type to MongoDB BSON type"""
+            type_mapping = {
+                "str": "string",
+                "int": "int",
+                "float": "double",
+                "bool": "bool",
+                "datetime": "date",
+                "Dict": "object",
+                "List": "array",
+            }
+            return type_mapping.get(yaml_type, yaml_type)
 
-        Returns:
-            Dict: MongoDB validation schema
-        """
-        # Basic validation schema with required fields
+        def process_field(field_def):
+            """Process a field definition from YAML to MongoDB format"""
+            if isinstance(field_def, str):
+                return {"bsonType": convert_type(field_def)}
+            elif isinstance(field_def, dict):
+                return {
+                    "bsonType": "object",
+                    "properties": {k: process_field(v) for k, v in field_def.items()},
+                }
+            elif isinstance(field_def, list):
+                # Handle List[Dict] case
+                return {"bsonType": "array"}
+            return field_def
+
+        # Process common fields
+        properties = {}
+        if "common_fields" in yaml_schema:
+            for field_name, field_def in yaml_schema["common_fields"].items():
+                properties[field_name] = process_field(field_def)
+
+        # Process entity fields
+        if "entity" in yaml_schema and "data" in yaml_schema["entity"]:
+            properties["data"] = process_field(yaml_schema["entity"]["data"])
+
+        # Process validations if present
+        required_fields = []
+        if "validations" in yaml_schema:
+            if "required" in yaml_schema["validations"]:
+                required_fields.extend(yaml_schema["validations"]["required"])
+
+        # Build final schema
         validation_schema = {
             "$jsonSchema": {
                 "bsonType": "object",
-                "required": ["_id", "type", "metadata"],
+                "required": ["_id", "type"] + required_fields,
                 "properties": {
                     "_id": {"bsonType": "string"},
                     "type": {"bsonType": "string"},
-                    "metadata": {
-                        "bsonType": "object",
-                        "required": ["created_at", "updated_at"],
-                        "properties": {
-                            "created_at": {"bsonType": "date"},
-                            "updated_at": {"bsonType": "date"},
-                        },
-                        "additionalProperties": True,
-                    },
+                    **properties,
                 },
-                "additionalProperties": True,
             }
         }
 
-        # If schema defines additional validations, merge them
-        if raw_schema.get("validations"):
-            self._merge_validations(
-                validation_schema["$jsonSchema"], raw_schema["validations"]
-            )
-
         return validation_schema
 
-    def _merge_validations(self, base_schema: Dict, custom_validations: Dict) -> None:
-        """
-        Merge custom validations into the base schema
-
-        Args:
-            base_schema: The base validation schema
-            custom_validations: Custom validation rules to merge
-        """
-        # Add required fields
-        if "required" in custom_validations:
-            base_schema["required"].extend(
-                field
-                for field in custom_validations["required"]
-                if field not in base_schema["required"]
-            )
-
-        # Add properties
-        if "properties" in custom_validations:
-            if "properties" not in base_schema:
-                base_schema["properties"] = {}
-            base_schema["properties"].update(custom_validations["properties"])
-
     def get_collection_name(self, schema_type: str) -> str:
-        """
-        Get the collection name for a schema type
-
-        Args:
-            schema_type: Type of the schema
-
-        Returns:
-            str: Collection name
-        """
+        """Get collection name for schema type"""
         return f"{schema_type}_collection"
 
     def get_validation_schema(self, schema_type: str) -> Dict:
-        """
-        Get the validation schema for a type
-
-        Args:
-            schema_type: Type of the schema
-
-        Returns:
-            Dict: Validation schema
-
-        Raises:
-            ValueError: If schema type not found
-        """
+        """Get validation schema for type"""
         if schema_type not in self.schemas:
             raise ValueError(f"Schema not found for type: {schema_type}")
         return self.schemas[schema_type]
