@@ -24,23 +24,32 @@ class DRFactory:
             raise ValueError(f"Failed to load schema: {str(e)}")
 
     def create_dr(self, dr_type: str, initial_data: Dict[str, Any]) -> Dict:
-        """
-        Crea un nuovo Digital Replica basato sullo schema e i dati iniziali.
-        Verifica che i dati rispettino la struttura dello schema.
-        """
-        if not self.schema or "schemas" not in self.schema:
-            raise ValueError("No valid schema loaded")
+        if not self.schema:
+            raise ValueError("No schema loaded")
 
-        # Validazione contro lo schema
-        self._validate_data(initial_data)
+        required_profile_fields = set(
+            self.schema["schemas"]["common_fields"]["profile"].keys()
+        )
+        provided_profile_fields = set(initial_data.get("profile", {}).keys())
+
+        missing_fields = required_profile_fields - provided_profile_fields
+        if missing_fields:
+            raise ValueError(f"Missing required profile fields: {missing_fields}")
+
+        for field, field_type in self.schema["schemas"]["common_fields"][
+            "profile"
+        ].items():
+            value = initial_data["profile"].get(field)
+            if value is not None:
+                if field_type == "str" and not isinstance(value, str):
+                    raise ValueError(f"Field {field} must be a string")
+                elif field_type == "int" and not isinstance(value, int):
+                    raise ValueError(f"Field {field} must be an integer")
 
         dr_base = {
-            "_id": initial_data.get("id", str(uuid.uuid4())),
+            "_id": str(uuid.uuid4()),
             "type": dr_type,
-            "profile": {
-                "name": initial_data.get("profile", {}).get("name"),
-                "description": initial_data.get("profile", {}).get("description"),
-            },
+            "profile": initial_data["profile"],
             "metadata": {
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
@@ -53,19 +62,18 @@ class DRFactory:
                 "relations": initial_data.get("relations", {}),
             },
         }
-
         return dr_base
 
     def _validate_data(self, data: Dict) -> None:
         """
-        Verifica che i dati rispettino la struttura definita nello schema
+        Validate the structure
         """
         if not self.schema or "schemas" not in self.schema:
             raise ValueError("Cannot validate: no valid schema loaded")
 
         required_fields = {"profile": {"name", "description"}, "data": {"status"}}
 
-        # Verifica profilo
+        # Verifies the profile
         if "profile" not in data:
             raise ValueError("Missing profile data")
 
@@ -74,7 +82,7 @@ class DRFactory:
         if missing_profile:
             raise ValueError(f"Missing required profile fields: {missing_profile}")
 
-        # Verifica misurazioni se presenti
+        # Verifies the measures
         if "measurements" in data:
             for m in data["measurements"]:
                 if not all(k in m for k in ("measure_type", "value", "timestamp")):
@@ -82,7 +90,7 @@ class DRFactory:
                         "Invalid measurement format. Required: measure_type, value, timestamp"
                     )
 
-        # Verifica dati
+        # Verifies data
         if "data" in data:
             data_fields = required_fields["data"] - set(data["data"].keys())
             if data_fields:
