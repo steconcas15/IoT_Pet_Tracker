@@ -45,7 +45,8 @@ The system is built on a layered architecture that promotes separation of concer
 
 ### Prerequisites
 - Python 3.8+
-- MongoDB 4.4+
+- Pymongo 4.10+
+- pyYAML 6.0+
 
 ### Environment Setup
 ```bash
@@ -76,10 +77,8 @@ database:
     name: "digital_twin_db"  # Your database name
     auth_source: "admin"     # Optional: authentication database
 ```
-
-```
-
 ### Basic Usage
+```
 
 1. **Define Your Entity Template**
 ```yaml
@@ -136,7 +135,6 @@ POST   /api/dt          # Create Digital Twin
 GET    /api/dt/{id}     # Get Digital Twin
 POST   /api/dr          # Create Digital Replica
 GET    /api/dr/{id}     # Get Digital Replica
-POST   /api/service     # Execute Service
 ```
 
 ## Extending the System

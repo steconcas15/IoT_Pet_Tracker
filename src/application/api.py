@@ -130,6 +130,3 @@ def register_api_blueprints(app):
     app.register_blueprint(dr_api)
     app.register_blueprint(dt_management_api)
 
-    # Import and register winery-specific APIs
-    from src.application.winery_apis import register_winery_blueprint
-    register_winery_blueprint(app)
