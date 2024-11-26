@@ -16,12 +16,12 @@ class FlaskServer:
 
     def _init_components(self):
         """Initialize all required components and store them in app config"""
+        schema_registry = SchemaRegistry()
         # Load database configuration
         db_config = ConfigLoader.load_database_config()
         connection_string = ConfigLoader.build_connection_string(db_config)
-        # Initialize SchemaRegistry
-        schema_registry = SchemaRegistry()
-        # Initialize DatabaseService with configuration
+
+        # Initialize DatabaseService with populated schema_registry
         db_service = DatabaseService(
             connection_string=connection_string,
             db_name=db_config["settings"]["name"],
@@ -36,9 +36,6 @@ class FlaskServer:
         self.app.config["SCHEMA_REGISTRY"] = schema_registry
         self.app.config["DB_SERVICE"] = db_service
         self.app.config["DT_FACTORY"] = dt_factory
-
-        # Store DTFactory reference in db_service for API access
-        db_service.dt_factory = dt_factory
 
     def _register_blueprints(self):
         """Register all API blueprints"""
