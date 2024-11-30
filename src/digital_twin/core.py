@@ -32,9 +32,7 @@ class DigitalTwin:
 
     def get_dt_data(self):
         """Get all DT data including DRs"""
-        return {
-            "digital_replicas": self.digital_replicas
-        }
+        return {"digital_replicas": self.digital_replicas}
 
     def execute_service(self, service_name: str, **kwargs):
         """Execute a named service with parameters"""
@@ -44,22 +42,20 @@ class DigitalTwin:
         service = self.active_services[service_name]
 
         # Prepare data for service
-        data = {
-            'digital_replicas': self.digital_replicas
-        }
+        data = {"digital_replicas": self.digital_replicas}
 
         # Execute service with data and additional parameters
         return service.execute(data, **kwargs)
 
-    def execute_service_on_dr(self, service_name: str, dr: Any) -> Any:
-        """
-        Esegue un servizio sui dati di una DR
-        """
-        if dr not in self.digital_replicas:
-            raise ValueError("This DR is not part of this Digital Twin")
+    # def execute_service_on_dr(self, service_name: str, dr: Any) -> Any:
+    #     """
+    #     Esegue un servizio sui dati di una DR
+    #     """
+    #     if dr not in self.digital_replicas:
+    #         raise ValueError("This DR is not part of this Digital Twin")
 
-        data = dr["data"]  # Assumiamo che la DR abbia un attributo data
-        return self.execute_service(service_name, data)
+    #     data = dr["data"]  # Assumiamo che la DR abbia un attributo data
+    #     return self.execute_service(service_name, data)
 
     # def get_digital_replicas_by_type(self, dr_type: str):
     #     """Get all digital replicas of a specific type"""
