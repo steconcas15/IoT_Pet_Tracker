@@ -1,1 +1,60 @@
+schemas:
+  common_fields:
+    _id: str                                        # Unique global identifier for the user (e.g., "user_concas_01")
+    type: str                                       # Defines the Digital Replica category ("user_profile")
+    profile:
+      username: str                                 # Unique name used by the human to log in
+      password: str                                 # Hashed credential for authentication
+      telegram_id: int                              # Unique Telegram account ID linked to the bot
+    metadata:
+      created_at: datetime                          # Timestamp of account creation
+      updated_at: datetime                          # Timestamp of the last profile update
+      status: str                                   # Current lifecycle state of the account
 
+  entity:
+    data:
+      last_login: datetime                          # Dynamic timestamp updated at every login event
+      environments_permissions: List[Dict]          # Dynamic array linking the user to specific environments and roles
+
+validations:
+  mandatory_fields:
+    root:
+      - _id
+      - type
+    profile:
+      - username
+      - password
+      - telegram_id
+    metadata:
+      - created_at
+      - updated_at
+      - status
+
+  type_constraints:                                 # Fixed typo: changed from 'type_constarints'
+    profile.username:   
+      type: str
+    profile.password:
+      type: str
+    profile.telegram_id:
+      type: int
+    metadata.status:
+      type: str
+      enum: ["active", "inactive", "suspended"]     # Restricts the status to these 3 strict operational modes
+    entity.last_login:
+      type: datetime
+      
+    entity.environments_permissions:
+      type: List[Dict]
+      item_constraints:                             # Defines structural requirements for each object in the list
+        required_fields: ["home_id", "role"]        # Fields that must be present in every environment dictionary
+        type_mappings:
+          home_id: str                              # References the unique ID of the target environment
+          role: str                                 # User access level within that specific environment
+        enum: ["admin", "viewer"]                   # Enforces RBAC: only "admin" or "viewer" roles are allowed
+
+  initialization:
+    metadata:
+      status: "active"                              # New accounts are deployed as active by default
+    entity:
+      last_login: null                              # Null until the first successful login occurs
+      environments_permissions: []                  # Starts as an empty list until associated with an environment
