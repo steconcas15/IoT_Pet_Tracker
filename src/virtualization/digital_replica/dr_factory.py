@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Type, Optional, List, Union
 from pydantic import BaseModel, create_model, Field, field_validator
 import yaml
@@ -61,7 +61,7 @@ class DRFactory:
                 Field(None if not is_required else ..., **constraints),
             )
 
-        model = create_model("Profile", **field_definitions)
+        validators_dict = {}
 
         # Add enum validators where needed
         for field_name in field_definitions:
@@ -71,14 +71,18 @@ class DRFactory:
             ):
                 enum_values = type_constraints[field_name]["enum"]
 
-                @field_validator(field_name)
-                def validate_enum(value, field):
-                    if value not in enum_values:
-                        raise ValueError(f"{field.name} must be one of {enum_values}")
-                    return value
+                def make_enum_validator(allowed=enum_values, name=field_name):
+                    def validate_enum(cls, value):
+                        if value not in allowed:
+                            raise ValueError(f"{name} must be one of {allowed}")
+                        return value
+                    return validate_enum
 
-                setattr(model, f"validate_{field_name}", validate_enum)
+                validators_dict[f"validate_{field_name}"] = field_validator(field_name, mode="before")(
+                    make_enum_validator()
+                )
 
+        model = create_model("Profile", __validators__=validators_dict, **field_definitions)
         return model
 
     def _create_data_model(self) -> Type[BaseModel]:
@@ -111,26 +115,27 @@ class DRFactory:
                     Field(None),
                 )
 
-        model = create_model("Data", **field_definitions)
+        validators_dict = {}
 
         # Add validators for fields that need them
         for field_name, field_type in data_fields.items():
-            # Add enum validator if needed
             if (
                 field_name in type_constraints
                 and "enum" in type_constraints[field_name]
             ):
                 enum_values = type_constraints[field_name]["enum"]
 
-                @field_validator(field_name)
-                def validate_enum(value, field):
-                    if value not in enum_values:
-                        raise ValueError(f"{field.name} must be one of {enum_values}")
-                    return value
+                def make_enum_validator(allowed=enum_values, name=field_name):
+                    def validate_enum(cls, value):
+                        if value not in allowed:
+                            raise ValueError(f"{name} must be one of {allowed}")
+                        return value
+                    return validate_enum
 
-                setattr(model, f"validate_{field_name}", validate_enum)
+                validators_dict[f"validate_{field_name}"] = field_validator(field_name, mode="before")(
+                    make_enum_validator()
+                )
 
-            # Add List[Dict] validator if needed
             if field_type == "List[Dict]" and field_name in type_constraints:
                 rules = type_constraints[field_name]
                 if "item_constraints" in rules:
@@ -138,62 +143,63 @@ class DRFactory:
                     required_fields = item_rules.get("required_fields", [])
                     type_mappings = item_rules.get("type_mappings", {})
 
-                    @field_validator(field_name)
-                    def validate_list_items(value, field):
-                        if not isinstance(value, list):
-                            raise ValueError(f"{field.name} must be a list")
+                    def make_list_validator(req_f=required_fields, t_map=type_mappings, f_n=field_name):
+                        def validate_list_items(cls, value):
+                            if not isinstance(value, list):
+                                raise ValueError(f"{f_n} must be a list")
 
-                        for idx, item in enumerate(value):
-                            if not isinstance(item, dict):
-                                raise ValueError(
-                                    f"Item {idx} in {field.name} must be a dictionary"
+                            for idx, item in enumerate(value):
+                                if not isinstance(item, dict):
+                                    raise ValueError(
+                                        f"Item {idx} in {f_n} must be a dictionary"
+                                    )
+
+                                missing = [f for f in req_f if f not in item]
+                                if missing:
+                                    raise ValueError(
+                                        f"Missing required fields {missing} in item {idx}"
                                 )
 
-                            missing = [f for f in required_fields if f not in item]
-                            if missing:
-                                raise ValueError(
-                                    f"Missing required fields {missing} in item {idx}"
-                                )
+                                for key, expected_type in t_map.items():
+                                    if key in item:
+                                        val = item[key]
+                                        if expected_type == "datetime":
+                                            if not isinstance(val, (datetime, str)):
+                                                raise ValueError(
+                                                    f"Field {key} in item {idx} must be a datetime"
+                                                )
+                                        elif expected_type == "float":
+                                            try:
+                                                item[key] = float(val)
+                                            except (TypeError, ValueError):
+                                                raise ValueError(
+                                                    f"Field {key} in item {idx} must be a number"
+                                                )
+                            return value
+                        return validate_list_items
 
-                            for key, expected_type in type_mappings.items():
-                                if key in item:
-                                    val = item[key]
-                                    if expected_type == "datetime":
-                                        if not isinstance(val, (datetime, str)):
-                                            raise ValueError(
-                                                f"Field {key} in item {idx} must be a datetime"
-                                            )
-                                    elif expected_type == "float":
-                                        try:
-                                            item[key] = float(val)
-                                        except (TypeError, ValueError):
-                                            raise ValueError(
-                                                f"Field {key} in item {idx} must be a number"
-                                            )
-                        return value
+                    validators_dict[f"validate_{field_name}"] = field_validator(field_name, mode="before")(
+                        make_list_validator()
+                    )
 
-                    setattr(model, f"validate_{field_name}", validate_list_items)
-
+        model = create_model("Data", __validators__=validators_dict, **field_definitions)
         return model
 
     def create_dr(self, dr_type: str, initial_data: Dict[str, Any]) -> Dict:
         """Create a new Digital Replica instance"""
-        # Create Pydantic models for sections
         ProfileModel = self._create_profile_model()
         DataModel = self._create_data_model()
 
-        # Initialize with required fields and defaults
         dr_dict = {
-            "_id": str(uuid.uuid4()),  # Usiamo _id per MongoDB
+            "_id": str(uuid.uuid4()),
             "type": dr_type,
             "metadata": {
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
             },
-            "data": {},  # Inizializziamo il contenitore data
+            "data": {},
         }
 
-        # Apply initialization defaults
         init_values = (
             self.schema["schemas"].get("validations", {}).get("initialization", {})
         )
@@ -207,13 +213,10 @@ class DRFactory:
                 "medications",
                 "measurements",
             ]:
-                # Questi campi vanno dentro data
                 dr_dict["data"][section] = defaults
             else:
-                # Altri campi vanno nella root
                 dr_dict[section] = defaults
 
-        # Update with provided data and validate each section
         if "profile" in initial_data:
             profile = ProfileModel(**initial_data["profile"])
             dr_dict["profile"] = profile.model_dump(exclude_unset=True)
@@ -229,13 +232,11 @@ class DRFactory:
 
     def update_dr(self, dr: Dict[str, Any], updates: Dict[str, Any]) -> Dict:
         """Update an existing Digital Replica"""
-        # Create Pydantic models
         ProfileModel = self._create_profile_model()
         DataModel = self._create_data_model()
 
         updated_dr = dr.copy()
 
-        # Validate and apply updates section by section
         if "profile" in updates:
             current_profile = updated_dr.get("profile", {})
             profile = ProfileModel(**(current_profile | updates["profile"]))
@@ -249,7 +250,6 @@ class DRFactory:
         if "metadata" in updates:
             updated_dr["metadata"].update(updates["metadata"])
 
-        # Update timestamp
-        updated_dr["metadata"]["updated_at"] = datetime.utcnow()
+        updated_dr["metadata"]["updated_at"] = datetime.now(timezone.utc)
 
         return updated_dr
