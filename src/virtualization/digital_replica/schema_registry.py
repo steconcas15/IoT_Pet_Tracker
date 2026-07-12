@@ -37,6 +37,8 @@ class SchemaRegistry:
                 "datetime": "date",
                 "Dict": "object",
                 "List": "array",
+                "List[Dict]": "array",  # <-- CORREZIONE: Supporto per List[Dict] richiesto dal README
+                "List[str]": "array",
             }
             return type_mapping.get(yaml_type, yaml_type)
 
@@ -50,7 +52,6 @@ class SchemaRegistry:
                     "properties": {k: process_field(v) for k, v in field_def.items()},
                 }
             elif isinstance(field_def, list):
-                # Handle List[Dict] case
                 return {"bsonType": "array"}
             return field_def
 
@@ -65,16 +66,29 @@ class SchemaRegistry:
             properties["data"] = process_field(yaml_schema["entity"]["data"])
 
         # Process validations if present
-        required_fields = []
-        if "validations" in yaml_schema:
-            if "required" in yaml_schema["validations"]:
-                required_fields.extend(yaml_schema["validations"]["required"])
+        required_root = []
+        validations = yaml_schema.get("validations", {})
+        mandatory = validations.get("mandatory_fields", {})
+
+        # CORREZIONE: Legge i campi obbligatori di radice (root) dal nuovo formato YAML
+        if "root" in mandatory:
+            required_root.extend(mandatory["root"])
+            
+        # CORREZIONE: Applica i campi obbligatori interni a 'profile' e 'metadata' se esistono
+        for sub_section in ["profile", "metadata"]:
+            if sub_section in mandatory and sub_section in properties:
+                properties[sub_section]["required"] = mandatory[sub_section]
+
+        # Garantisce che _id e type siano sempre inclusi come richiesto dalle linee guida
+        for default_field in ["_id", "type"]:
+            if default_field not in required_root:
+                required_root.append(default_field)
 
         # Build final schema
         validation_schema = {
             "$jsonSchema": {
                 "bsonType": "object",
-                "required": ["_id", "type"] + required_fields,
+                "required": required_root,
                 "properties": {
                     "_id": {"bsonType": "string"},
                     "type": {"bsonType": "string"},
