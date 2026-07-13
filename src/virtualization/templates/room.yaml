@@ -47,5 +47,5 @@ schemas:
       esp32cam_device: ""
       ultrasonic_sensors: []
       metadata:
-        permission_level: "allowed:
+        permission_level: "allowed"
       
