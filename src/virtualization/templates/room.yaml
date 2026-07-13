@@ -16,6 +16,7 @@ schemas:
       status: str                   # Room occupancy status (empty/occupied)
       esp32cam_device: str          # Camera identifier
       ultrasonic_sensors: List[str] # List of ultrasonic sensor IDs in the room
+      occupancy_stats: List[Dict]   # Historical daily occupancy statistics
 
   validations:
     mandatory_fields:
@@ -34,13 +35,21 @@ schemas:
       floor:
         type: int
         min: -1 # Allowing for basement floor
-        max: 2
+        max: 2  # 0 --> ground floor | 1 --> first floor | 2 --> loft
       permission_level:
         type: str
         enum: ["allowed", "forbidden"]
       status:
         type: str
         enum: ["empty", "occupied"]
+      occupancy_stats:
+        type: List[Dict]
+        item_constraints:
+          required_fields: ["date", "daily_stay_duration_mins", "dog_entries_count"]
+          type_mappings:
+            date: datetime
+            daily_stay_duration_mins: float  # Residence time in minutes
+            dog_entries_count: int           # Number of times the dog comes in
 
     initialization:
       status: "empty"
@@ -48,4 +57,5 @@ schemas:
       ultrasonic_sensors: []
       metadata:
         permission_level: "allowed"
+      occupancy_stats: []
       
