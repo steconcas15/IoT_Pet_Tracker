@@ -1,0 +1,56 @@
+schemas:
+  common_fields:
+    _id: str
+    type: str
+    profile:
+      name: str        # Pet name
+      species: str     # Pet species
+    metadata:
+      created_at: datetime    # Creation timestamp
+      updated_at: datetime    # Last update timestamp
+      
+  entity:
+    data:
+      buzzer: str             # Buzzer identifier
+      current_room: str       # ID of the room where the pet currently is
+      buzzer_status: str      # Buzzer status (on/off)
+      daily_buzzer_stats: List[Dict] # Daily summary of buzzer metrics
+
+  validations:
+    mandatory_fields:
+      root:
+        - _id
+        - type
+      profile:
+        - name
+        - species
+      metadata:
+        - created_at
+        - updated_at
+
+    type_constraints:
+      buzzer_status:
+        type: str
+        enum: ["off", "on"]
+      daily_buzzer_stats:
+        type: List[Dict]
+        item_constraints:
+          required_fields: [
+            "date", 
+            "auto_violations_count", 
+            "auto_duration_seconds", 
+            "manual_actions_count", 
+            "manual_duration_seconds"
+          ]
+          type_mappings:
+            date: datetime
+            auto_violations_count: int
+            auto_duration_seconds: int
+            manual_actions_count: int
+            manual_duration_seconds: int
+
+    initialization:
+      buzzer: ""
+      current_room: ""
+      buzzer_status: "off"
+      daily_buzzer_stats: []
