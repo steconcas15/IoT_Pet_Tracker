@@ -1,1 +1,51 @@
+schemas:
+  common_fields:
+    _id: str
+    type: str
+    profile:
+      name: str        # Room name
+      description: str # Room description
+      floor: int       # Floor number
+    metadata:
+      created_at: datetime    # Creation timestamp
+      updated_at: datetime    # Last update timestamp
+      permission_level: str   # Permission setting
+      
+  entity:
+    data:
+      status: str                   # Room occupancy status (empty/occupied)
+      esp32cam_device: str          # Camera identifier
+      ultrasonic_sensors: List[str] # List of ultrasonic sensor IDs in the room
 
+  validations:
+    mandatory_fields:
+      root:
+        - _id
+        - type
+      profile:
+        - name
+        - floor
+      metadata:
+        - created_at
+        - updated_at
+        - permission_level
+
+    type_constraints:
+      floor:
+        type: int
+        min: -1 # Allowing for basement floor
+        max: 2
+      permission_level:
+        type: str
+        enum: ["allowed", "forbidden"]
+      status:
+        type: str
+        enum: ["empty", "occupied"]
+
+    initialization:
+      status: "empty"
+      esp32cam_device: ""
+      ultrasonic_sensors: []
+      metadata:
+        permission_level: "allowed:
+      
