@@ -1,9 +1,30 @@
-from flask import Flask
+# ==============================================================================
+# 1. CORE DEPENDENCIES & PACKAGES
+# ==============================================================================
+
+# Pulling in Flask to spin up our web server.
+from flask import Flask  # Pulling in Flask to spin up our web server.
+
+# CORS is a must-have so our frontend (like React) can talk to this API.
 from flask_cors import CORS
+
+# ==============================================================================
+# 2. INTERNAL MODULES & SERVICES (Digital Twin Stack)
+# ==============================================================================
+
+# Tracks and validates data structures/blueprints for our digital replicas
 from src.virtualization.digital_replica.schema_registry import SchemaRegistry
+
+# The heavy lifter for database interactions (queries, connections, etc.).
 from src.services.database_service import DatabaseService
+
+# Factory pattern handler to dynamically build out Digital Twin instances.
 from src.digital_twin.dt_factory import DTFactory
+
+# Links and registers all our API routes/endpoints in one go.
 from src.application.api import register_api_blueprints
+
+# Quick utility to grab credentials and settings from config files.
 from config.config_loader import ConfigLoader
 
 
