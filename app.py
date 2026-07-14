@@ -19,6 +19,7 @@ class FlaskServer:
         schema_registry = SchemaRegistry()
         # Load database configuration
         db_config = ConfigLoader.load_database_config()
+
         connection_string = ConfigLoader.build_connection_string(db_config)
 
         # Initialize DatabaseService with populated schema_registry

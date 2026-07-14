@@ -1,13 +1,13 @@
 import pprint
 # Importiamo la classe dal file aggiornato
-from digital_twin.schema_registry import SchemaRegistry
+from digital_replica.schema_registry import SchemaRegistry
 
 def esegui_test():
     registry = SchemaRegistry()
     
     # DATI DI CONFIGURAZIONE (Cambia i nomi se sono diversi)
     NOME_SCHEMA = "wine" 
-    PATH_YAML = "template\wine.yaml"  # <--- Metti il nome esatto del tuo file YAML
+    PATH_YAML = r"templates\wine.yaml"  # <--- Metti il nome esatto del tuo file YAML
     
     print(f"--- 🚀 Avvio Test di Conversione per: {PATH_YAML} ---")
     try:
