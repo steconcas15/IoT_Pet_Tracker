@@ -2,8 +2,8 @@ database:
   connection:
     host: "localhost"
     port: 27017
-    username: "PetTracker"  # Leave empty if no authentication is required
-    password: "PetTracker"  # Leave empty if no authentication is required
+    username: ""  # Leave empty if no authentication is required
+    password: ""  # Leave empty if no authentication is required
   settings:
-    name: "IoT_Pet_Tracker_db"  # Your database name
+    name: "pet_tracker_db"  # Your database name
     auth_source: "admin"
