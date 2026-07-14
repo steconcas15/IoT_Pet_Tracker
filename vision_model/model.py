@@ -2,49 +2,49 @@ import cv2
 from ultralytics import YOLO
 
 
-def classifica_pet(model_path: str, image_path: str) -> str:
-    """Carica il modello YOLO specificato, analizza l'immagine e restituisce
+class PetDetector:
 
-    una stringa che descrive se ha trovato un cane, un gatto, entrambi o nulla.
-    """
-    # 1. Carica il modello dal path fornito
-    model = YOLO(model_path)
+    def __init__(self):
+        """Initializes the detector with a hardcoded, fixed model path.
 
-    # ID delle classi nel dataset COCO: 15 = gatto, 16 = cane
-    pet_classes = [15, 16]
+        The main application doesn't need to know where the weights are.
+        """
+        # The path is fixed right here once and for all
+        self.model_path = "weights/yolov8n.pt"
 
-    # 2. Esegue l'inferenza filtrando solo per cani e gatti
-    results = model(image_path, conf=0.4, classes=pet_classes, verbose=False)
-    result = results[0]
+        print(f"[YOLO] Loading fixed model from {self.model_path}...")
+        self.model = YOLO(self.model_path)
 
-    # 3. Analizza i box trovati per decidere la label di ritorno
-    trovato_gatto = False
-    trovato_cane = False
+        # Text mapping for standard COCO dataset classes (English only)
+        self.class_mapping = {
+            "cat": 15,
+            "dog": 16,
+        }
 
-    for box in result.boxes:
-        class_id = int(box.cls[0])
-        if class_id == 15:
-            trovato_gatto = True
-        elif class_id == 16:
-            trovato_cane = True
+    def detect_target(self, image_path: str, target: str) -> bool:
+        """Checks if the target animal is present in the image.
 
-    # 4. Ritorna la label testuale basata sui rilevamenti
-    if trovato_cane and trovato_gatto:
-        return "both"
-    elif trovato_cane:
-        return "dog"
-    elif trovato_gatto:
-        return "cat"
-    else:
-        return "nothing"
+        Arguments:
+            image_path: path to the image file
+            target: 'dog' or 'cat'
 
+        Returns:
+            bool: True if found, False otherwise.
+        """
+        target_clean = target.lower().strip()
 
-# =====================================================================
-# ESEMPIO DI UTILIZZO (Modifica i path con i tuoi file reali):
-# =====================================================================
-if __name__ == "__main__":
-    PATH_MODELLO = "weights/yolov8n.pt"
-    PATH_IMMAGINE = "cane.png"
+        if target_clean not in self.class_mapping:
+            raise ValueError(
+                f"Target '{target}' is invalid. Choose between: 'dog' or 'cat'."
+            )
 
-    label_risultato = classifica_pet(PATH_MODELLO, PATH_IMMAGINE)
-    print(f"Risultato classificazione: {label_risultato}")
+        target_class_id = self.class_mapping[target_clean]
+
+        # Inference uses the pre-loaded fixed model
+        results = self.model(
+            image_path, conf=0.4, classes=[target_class_id], verbose=False
+        )
+        result = results[0]
+
+        # Returns True if at least one bounding box is found, False otherwise
+        return len(result.boxes) > 0
