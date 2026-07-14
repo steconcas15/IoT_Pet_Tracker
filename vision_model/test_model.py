@@ -1,6 +1,6 @@
 from model import PetDetector
 
-# 1. Initialize the detector (it loads the weights automatically from 'weights/yolov8n.pt')
+# 1. Initialize the detector (it loads the weights automatically from 'weights/yolo11x.pt')
 detector = PetDetector()
 
 
@@ -21,8 +21,10 @@ def check_animal_presence(image_path: str, animal_to_find: str) -> bool:
 # CLEAN TEST EXECUTION
 # =====================================================================
 if __name__ == "__main__":
+    print("\n--- AVVIO TEST CON STRUTTURA DEL PROGETTO (YOLO11x) ---\n")
+
     # Test case 1: Check for a dog
-    is_dog_here = check_animal_presence("cane.png", "dog")
+    is_dog_here = check_animal_presence("gatto.jpg", "dog")
 
     # Test case 2: Check for a cat
-    is_cat_here = check_animal_presence("cane.png", "cat")
+    is_cat_here = check_animal_presence("gatto.jpg", "cat")
