@@ -2,8 +2,8 @@ database:
   connection:
     host: "localhost"
     port: 27017
-    username: ""  # Leave empty if no authentication is required
-    password: ""  # Leave empty if no authentication is required
+    username: "PetTracker"  # Leave empty if no authentication is required
+    password: "PetTracker"  # Leave empty if no authentication is required
   settings:
-    name: "digital_twin_db"  # Your database name
+    name: "IoT_Pet_Tracker_db"  # Your database name
     auth_source: "admin"
