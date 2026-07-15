@@ -27,6 +27,9 @@ from src.application.api import register_api_blueprints
 # Quick utility to grab credentials and settings from config files.
 from config.config_loader import ConfigLoader
 
+# ==============================================================================
+# 3. SERVER INITIALIZATION & LIFECYCLE MANAGEMENT
+# ==============================================================================
 
 class FlaskServer:
     def __init__(self):
