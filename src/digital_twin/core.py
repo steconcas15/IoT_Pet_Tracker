@@ -16,7 +16,7 @@ class DigitalTwin:
     Core Digital Twin (DT) management class.
     Acts as the central coordinator, mapping digital replicas (DRs)
     to active services that process their data.
-    """"
+    """
 
     # ==========================================================================
     # METHOD: __init__
@@ -87,7 +87,7 @@ class DigitalTwin:
     # ==========================================================================
     def get_dt_data(self):
         """
-        Retrieves the datas of the Digital Twin, including all its DRs.
+        Retrieves the data of the Digital Twin, including all its DRs.
         
         :return: A dictionary containing the list of digital replicas.
         """
