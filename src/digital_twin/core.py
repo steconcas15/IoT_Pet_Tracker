@@ -1,5 +1,10 @@
+# ==============================================================================
+# SYSTEM & THIRD-PARTY IMPORTS
+# ==============================================================================
+# Dict, List, Optional: Standard typing utilities used for explicit Python type hinting
 from typing import Dict, List, Type, Any
 from src.services.base import BaseService
+# datetime: Used to generate accurate UTC timestamps for creation and update metadata
 from datetime import datetime
 
 
