@@ -37,7 +37,10 @@ class FlaskServer:
 
     def _init_components(self):
         """Initialize all required components and store them in app config"""
+
+        # 1 - Spins up the central schema manager. It will load, compile, and cache our YAML blueprints into MongoDB-compatible rules.
         schema_registry = SchemaRegistry()
+        
         # Load database configuration
         db_config = ConfigLoader.load_database_config()
 
