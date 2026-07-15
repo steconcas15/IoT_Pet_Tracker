@@ -44,9 +44,10 @@ class FlaskServer:
         # 1 - Spins up the central schema manager. It will load, compile, and cache our YAML blueprints into MongoDB-compatible rules.
         schema_registry = SchemaRegistry()
         
-        # Load database configuration
+        # 2.0 - Load the database configuration settings from the YAML file (db_config will contain a dictionary of your YAML database settings)
         db_config = ConfigLoader.load_database_config()
 
+        # 2.1 Dynamically build the final MongoDB connection URI using the loaded config (connection_string <- "mongodb://localhost:27017")
         connection_string = ConfigLoader.build_connection_string(db_config)
 
         # Initialize DatabaseService with populated schema_registry
