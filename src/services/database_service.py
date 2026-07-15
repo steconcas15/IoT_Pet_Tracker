@@ -173,18 +173,25 @@ class DatabaseService:
                 update_data["metadata"] = {}
             update_data["metadata"]["updated_at"] = datetime.utcnow()
 
-            # Let SchemaRegistry handle validation through MongoDB schema
+            # Execute the partial update using MongoDB's $set operator
             result = self.db[collection_name].update_one(
                 {"_id": dr_id}, {"$set": update_data}
             )
 
+            # Raise an error if no document matched the target identifier
             if result.matched_count == 0:
                 raise ValueError(f"Digital Replica not found: {dr_id}")
 
         except Exception as e:
             raise Exception(f"Failed to update Digital Replica: {str(e)}")
 
+    # ==============================================================================
+    # 9. DELETE: REMOVE RECORD
+    # ==============================================================================
     def delete_dr(self, dr_type: str, dr_id: str) -> None:
+        """
+        Deletes a single Digital Replica document using its unique identifier.
+        """
         if not self.is_connected():
             raise ConnectionError("Not connected to MongoDB")
 
@@ -192,6 +199,7 @@ class DatabaseService:
             collection_name = self.schema_registry.get_collection_name(dr_type)
             result = self.db[collection_name].delete_one({"_id": dr_id})
 
+            # Confirm a document was actually deleted
             if result.deleted_count == 0:
                 raise ValueError(f"Digital Replica not found: {dr_id}")
         except Exception as e:
