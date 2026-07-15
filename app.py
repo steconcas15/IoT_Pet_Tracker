@@ -68,20 +68,38 @@ class FlaskServer:
         self.app.config["DB_SERVICE"] = db_service
         self.app.config["DT_FACTORY"] = dt_factory
 
+
+    # ==============================================================================
+    #                  API REGISTRATION & SERVER RUNTIME METHODS
+    # ==============================================================================
     def _register_blueprints(self):
         """Register all API blueprints"""
+
+        # Call the registration function in api.py, passing this app to bind all routes (dt_api, dr_api, dt_management_api)
         register_api_blueprints(self.app)
 
     def run(self, host="0.0.0.0", port=5000, debug=True):
         """Run the Flask server"""
         try:
+            # Start the local development server with the specified parameters
             self.app.run(host=host, port=port, debug=debug)
+            
         finally:
             # Cleanup on server shutdown
             if "DB_SERVICE" in self.app.config:
+                # Safely disconnect the database connection pipe when the Flask server stops
                 self.app.config["DB_SERVICE"].disconnect()
 
 
+# ==============================================================================
+#                           APPLICATION ENTRY POINT
+# ==============================================================================
+# Main execution block to bootstrap and run the server instance
+
 if __name__ == "__main__":
+
+    # Create the FlaskServer wrapper instance
     server = FlaskServer()
+
+    # Execute the run method to start listening for HTTP requests defined in api.py
     server.run()
