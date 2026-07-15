@@ -47,18 +47,20 @@ class FlaskServer:
         # 2.0 - Load the database configuration settings from the YAML file (db_config will contain a dictionary of your YAML database settings)
         db_config = ConfigLoader.load_database_config()
 
-        # 2.1 Dynamically build the final MongoDB connection URI using the loaded config (connection_string <- "mongodb://localhost:27017")
+        # 2.1 - Dynamically build the final MongoDB connection URI using the loaded config (connection_string <- "mongodb://localhost:27017")
         connection_string = ConfigLoader.build_connection_string(db_config)
 
-        # Initialize DatabaseService with populated schema_registry
+        # 2.2 - Initialize DatabaseService with populated schema_registry
         db_service = DatabaseService(
             connection_string=connection_string,
             db_name=db_config["settings"]["name"],
             schema_registry=schema_registry,
         )
+
+        # 2.3 - Open the physical pipe (tubo) to the database.
         db_service.connect()
 
-        # Initialize DTFactory
+        # 3- Hand over the DB and schemas to the factory to forge our Digital Twins.
         dt_factory = DTFactory(db_service, schema_registry)
 
         # Store references
