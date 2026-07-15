@@ -1,8 +1,22 @@
+# ==============================================================================
+# SYSTEM & THIRD-PARTY IMPORTS
+# ==============================================================================
+
+# Dict, List, Optional: Standard typing utilities used for explicit Python type hinting
 from typing import Dict, List, Optional
+# datetime: Used to generate accurate UTC timestamps for creation and update metadata
 from datetime import datetime
+# ObjectId: MongoDB BSON utility used to generate safe, unique database identifiers
 from bson import ObjectId
+
+# ==============================================================================
+# LOCAL PROJECT IMPORTS (APPLICATION MODULES)
+# ==============================================================================
+# DatabaseService: Coordinates raw MongoDB connections and handles direct document queries
 from src.services.database_service import DatabaseService
+# SchemaRegistry: Manages data schemas and ensures Digital Replicas follow expected structures
 from src.virtualization.digital_replica.schema_registry import SchemaRegistry
+# DigitalTwin: The core class instantiated in-memory to hold active replicas and services
 from src.digital_twin.core import DigitalTwin
 
 
