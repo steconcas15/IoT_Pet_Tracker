@@ -342,22 +342,22 @@ def remove_viewer(dt_id, viewer_id):
         return jsonify({'status': 'error', 'message': f'Failed to remove viewer: {str(e)}'}), 500
 
 
-# ----------------- AGGIUNTA STANZA A UNA SPECIFICA HOME -------------------
+# ----------------- Adding a room to a specific home -------------------
 @dt_api.route('/<string:dt_id>/rooms', methods=['POST'])
 def create_and_associate_room(dt_id):
     """
-    Crea una Digital Replica di tipo Room validando i campi con la DRFactory
-    e la associa istantaneamente all'Home Environment.
+    Creates a "Room" type Digital Replica, validating the fields using DRFactory,
+    and instantly associates it with the Home Environment.
     """
     try:
         raw_data = request.get_json()
 
-        # 1. Verifichiamo subito se la casa (Digital Twin) esiste tramite la factory
+        # 1. Let's immediately verify if the house (Digital Twin) exists via the factory.
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
 
-        # 2. Strutturiamo i dati flat di Postman per renderli compatibili con DRFactory
+        # 2. We structure flat data to make it compatible with DRFactory.
         initial_data = {
             "profile": {
                 "name": raw_data.get("name"),
@@ -372,24 +372,24 @@ def create_and_associate_room(dt_id):
             }
         }
 
-        # Gestiamo opzionalmente il permission_level nei metadata se inviato
+        # Optionally handle permission_level in metadata if provided
         if "permission_level" in raw_data:
             initial_data["metadata"] = {"permission_level": raw_data["permission_level"]}
 
-        # 3. VALIDAZIONE PYDANTIC: deleghiamo la creazione e il controllo dello YAML alla DRFactory
-        # Se un campo obbligatorio manca o è fuori range (es. floor > 2), Pydantic lancerà un ValueError.
+        # 3. PYDANTIC VALIDATION: we delegate the creation and validation of the YAML to the DRFactory.
+        # If a required field is missing or out of range (e.g., floor > 2), Pydantic will raise a ValueError.
         validated_room = current_app.config['DR_FACTORY_ROOM'].create_dr(
             dr_type='room',
             initial_data=initial_data
         )
 
-        # 4. Salvataggio della replica validata nel database
+        # 4. Saving the validated replica to the database
         room_id = current_app.config['DB_SERVICE'].save_dr(
             dr_type='room',
             dr_data=validated_room
         )
 
-        # 5. ASSOCIAZIONE NATURALE
+        # 5. NATURAL ASSOCIATION
         current_app.config['DT_FACTORY'].add_digital_replica(
             dt_id=dt_id,
             dr_type='room',
@@ -407,7 +407,7 @@ def create_and_associate_room(dt_id):
         }), 201
 
     except ValueError as ve:
-        # Pydantic lancerà un ValueError se le regole in room.yaml non sono rispettate
+        # Pydantic will raise a ValueError if the rules in room.yaml are not met.
         return jsonify({'error': f'Validation failed: {str(ve)}'}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Failed to add room: {str(e)}'}), 500
