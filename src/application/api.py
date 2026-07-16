@@ -270,18 +270,20 @@ def register_api_blueprints(app):
     # Register Digital Twin Management and Aggregation API routes
     app.register_blueprint(dt_management_api)
 
+# ==================================================================================================
 #--------------------------------------------- Nuove Robe -----------------------------------------
+# ==================================================================================================
 
-# ----------------- AGGIUNTA VISUALIZZATORE (Admin) -----------------
+# ----------------- ADD VIEWER (by the Admin) -----------------
 @dt_api.route('/<string:dt_id>/viewers', methods=['POST'])
 def add_viewer(dt_id):
     """
-    Aggiunge un utente visualizzatore a uno specifico Home Environment.
+    Adds a viewer user to a specific Home Environment.
     """
     try:
         data = request.get_json()
 
-        # Validazione input
+        # Input validation
         if not data or 'viewer_id' not in data:
             return jsonify({
                 'error': 'Missing viewer_id in request body'
@@ -289,12 +291,12 @@ def add_viewer(dt_id):
 
         viewer_id = data['viewer_id']
 
-        # 1. Verifichiamo che la casa esista prima di aggiungere permessi a caso
+        # 1. Let's verify that the house exists before adding permissions at random.
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': 'Home Environment not found'}), 404
 
-        # 2. Salviamo il permesso nel database
+        # 2. Let's save the permission to the database.
         current_app.config['DB_SERVICE'].add_home_viewer(dt_id, viewer_id)
 
         return jsonify({
@@ -308,25 +310,25 @@ def add_viewer(dt_id):
         }), 201
 
     except ValueError as ve:
-        # Cattura l'errore se l'utente era già stato aggiunto
+        # Catch the error if the user had already been added
         return jsonify({'status': 'error', 'message': str(ve)}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Failed to add viewer: {str(e)}'}), 500
 
 
-# ----------------- RIMOZIONE VISUALIZZATORE (Admin) -----------------
+# ----------------- VIEWER REMOVAL (by the Admin) -----------------
 @dt_api.route('/<string:dt_id>/viewers/<string:viewer_id>', methods=['DELETE'])
 def remove_viewer(dt_id, viewer_id):
     """
-    Rimuove l'accesso come visualizzatore a un utente specifico da un Home Environment.
+    Removes a specific user's viewer access to a Home Environment.
     """
     try:
-        # 1. Verifichiamo prima che la casa esista
+        # 1. First, let's verify that the house exists.
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': 'Home Environment not found'}), 404
 
-        # 2. Rimuoviamo il permesso dal database
+        # 2. Remove the permission from the database
         current_app.config['DB_SERVICE'].remove_home_viewer(dt_id, viewer_id)
 
         return jsonify({
@@ -340,7 +342,7 @@ def remove_viewer(dt_id, viewer_id):
         return jsonify({'status': 'error', 'message': f'Failed to remove viewer: {str(e)}'}), 500
 
 
-# ----------------- AGGIUNTA STANZA A UNA SPECIFICA HOME (TUTTO IN 1 STEP) -----------------
+# ----------------- AGGIUNTA STANZA A UNA SPECIFICA HOME -------------------
 @dt_api.route('/<string:dt_id>/rooms', methods=['POST'])
 def create_and_associate_room(dt_id):
     """
