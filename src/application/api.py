@@ -105,7 +105,7 @@ def delete_digital_twin(dt_id):
 
 
 
-# ------------- Route to fetch a specific Digital Twin's details by its ID using HTTP GET -------------
+# ------------- Route to fetch a specific Digital Twin's details by its ID using HTTP GET (Digital Twin -> Home Environment) -------------
 @dt_api.route('/<dt_id>', methods=['GET'])
 def get_digital_twin(dt_id):
     """Get Digital Twin details"""
@@ -125,7 +125,7 @@ def get_digital_twin(dt_id):
 
 
 
-# --------------- Route to retrieve a list of all existing Digital Twins using HTTP GET --------------
+# --------------- Route to retrieve a list of all existing Digital Twins (Home Environments) using HTTP GET --------------
 @dt_api.route('/', methods=['GET'])
 def list_digital_twins():
     """List all Digital Twins"""
