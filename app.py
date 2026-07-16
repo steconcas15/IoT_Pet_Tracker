@@ -18,6 +18,10 @@ from src.virtualization.digital_replica.schema_registry import SchemaRegistry
 # The heavy lifter for database interactions (queries, connections, etc.).
 from src.services.database_service import DatabaseService
 
+
+# Factory to enforce structural data integrity and schema validation via Pydantic models.
+from src.virtualization.digital_replica.dr_factory import DRFactory
+
 # Factory pattern handler to dynamically build out Digital Twin instances.
 from src.digital_twin.dt_factory import DTFactory
 
@@ -26,8 +30,6 @@ from src.application.api import register_api_blueprints
 
 # Quick utility to grab credentials and settings from config files.
 from config.config_loader import ConfigLoader
-
-from src.virtualization.digital_replica.dr_factory import DRFactory
 
 # ==============================================================================
 # 3. SERVER INITIALIZATION & LIFECYCLE MANAGEMENT
@@ -46,13 +48,13 @@ class FlaskServer:
         # 1 - Spins up the central schema manager. It will load, compile, and cache our YAML blueprints into MongoDB-compatible rules.
         schema_registry = SchemaRegistry()
 
-        # ==============================================================================
-        # AGGIUNTA: Carica lo schema per la stanza (Digital Replica)
-        # Assicurati che il percorso del file "room.yaml" corrisponda a dove lo hai salvato
-        # ==============================================================================
+        # 1.0 - Register and compile the 'room' schema for structural validation and data mapping.
         schema_registry.load_schema("room", "src/virtualization/templates/room.yaml")
 
+        # 1.1 - Register and compile the 'pet' schema for structural validation and data mapping.
         schema_registry.load_schema("pet", "src/virtualization/templates/pet.yaml")
+
+        
         # 2.0 - Load the database configuration settings from the YAML file (db_config will contain a dictionary of your YAML database settings)
         db_config = ConfigLoader.load_database_config()
 
