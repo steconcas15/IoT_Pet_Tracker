@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Any
 from pymongo import MongoClient
 from datetime import datetime
 from src.virtualization.digital_replica.schema_registry import SchemaRegistry
-
+from bson import ObjectId
 
 class DatabaseService:
 
@@ -204,3 +204,139 @@ class DatabaseService:
                 raise ValueError(f"Digital Replica not found: {dr_id}")
         except Exception as e:
             raise Exception(f"Failed to delete Digital Replica: {str(e)}")
+
+
+    #   ---------------------- Roba Nuova ---------------------------------------------
+
+    # 1
+    def set_home_admin(self, dt_id: str, user_id: str) -> None:
+        """
+        Registra la relazione nel database associando un utente come Admin
+        di uno specifico Digital Twin (Home Environment).
+        """
+        try:
+            # Accediamo a una collezione dedicata alle relazioni o ai permessi
+            # Se non esiste, MongoDB la creerà automaticamente al primo inserimento
+            permissions_collection = self.db["home_permissions"]
+
+            permission_data = {
+                "home_id": dt_id,
+                "user_id": user_id,
+                "role": "admin"
+            }
+
+            # Inseriamo il documento nel database
+            permissions_collection.insert_one(permission_data)
+
+        except Exception as e:
+            raise Exception(f"Errore nel salvataggio dell'admin sul database: {str(e)}")
+
+    # 2
+    def remove_home_permissions(self, dt_id: str) -> None:
+        """
+        Cancella tutti i permessi (Admin e Visualizzatori) associati a una specifica Home.
+        """
+        try:
+            self.db["home_permissions"].delete_many({"home_id": dt_id})
+        except Exception as e:
+            raise Exception(f"Errore nella cancellazione dei permessi: {str(e)}")
+
+
+    # 3
+    def add_home_viewer(self, dt_id: str, viewer_id: str) -> None:
+        """
+        Associa un utente come visualizzatore (viewer) a un Home Environment.
+        """
+        try:
+            permissions_collection = self.db["home_permissions"]
+
+            # 1. Controlliamo se l'utente ha già i permessi per questa casa
+            existing = permissions_collection.find_one({
+                "home_id": dt_id,
+                "user_id": viewer_id
+            })
+
+            if existing:
+                raise ValueError("Questo utente è già associato a questa casa!")
+
+            # 2. Creiamo il nuovo permesso con ruolo 'viewer'
+            permission_data = {
+                "home_id": dt_id,
+                "user_id": viewer_id,
+                "role": "viewer"
+            }
+
+            permissions_collection.insert_one(permission_data)
+
+        except ValueError as ve:
+            # Rilanciamo l'errore di validazione (duplicato)
+            raise ve
+        except Exception as e:
+            raise Exception(f"Errore nell'aggiunta del visualizzatore al DB: {str(e)}")
+
+    # 4
+    def remove_home_viewer(self, dt_id: str, viewer_id: str) -> None:
+        """
+        Rimuove il ruolo di visualizzatore (viewer) di un utente specifico da una Home.
+        """
+        try:
+            permissions_collection = self.db["home_permissions"]
+
+            # Eseguiamo una cancellazione mirata sul match di home_id, user_id e ruolo viewer
+            result = permissions_collection.delete_one({
+                "home_id": dt_id,
+                "user_id": viewer_id,
+                "role": "viewer"
+            })
+
+            # Se non ha cancellato nulla, significa che l'utente non era un viewer di quella casa
+            if result.deleted_count == 0:
+                raise ValueError("Visualizzatore non trovato o l'utente non ha questo ruolo per questa casa.")
+
+        except ValueError as ve:
+            raise ve
+        except Exception as e:
+            raise Exception(f"Errore nella rimozione del visualizzatore dal DB: {str(e)}")
+
+
+    # 5
+    def create_room_dr(self, room_data: dict) -> str:
+        """
+        Salva una nuova Digital Replica di tipo 'room' nel database rispettando
+        la collezione dinamica impostata dallo SchemaRegistry.
+        """
+        try:
+
+            # Generiamo un nuovo ID come stringa pulita
+            room_id = str(ObjectId())
+
+            # Costruiamo il documento completo rispettando lo schema dello YAML
+            full_room = {
+                "_id": room_id,
+                "type": "room",
+                "profile": {
+                    "name": room_data["name"],
+                    "description": room_data.get("description", ""),
+                    "floor": room_data["floor"]
+                },
+                "data": {
+                    "status": "empty",
+                    "esp32cam_device": room_data.get("esp32cam_mac", ""),  # MAC Address
+                    "ultrasonic_sensors": room_data.get("ultrasonic_sensors", []),  # Array sensori
+                    "occupancy_stats": []
+                },
+                "metadata": {
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "permission_level": room_data.get("permission_level", "allowed")
+                }
+            }
+
+
+            # -------------------------------------
+            # SALVATAGGIO CORRETTO: Sfruttiamo il metodo nativo del DB Service
+            # che interroga il registro e lo salva nella collezione corretta ("room_collection")!
+            return self.save_dr(dr_type="room", dr_data=full_room)
+
+        except Exception as e:
+            raise Exception(f"Errore nella creazione della Stanza nel DB: {str(e)}")

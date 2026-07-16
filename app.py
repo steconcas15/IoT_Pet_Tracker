@@ -27,6 +27,8 @@ from src.application.api import register_api_blueprints
 # Quick utility to grab credentials and settings from config files.
 from config.config_loader import ConfigLoader
 
+from src.virtualization.digital_replica.dr_factory import DRFactory
+
 # ==============================================================================
 # 3. SERVER INITIALIZATION & LIFECYCLE MANAGEMENT
 # ==============================================================================
@@ -43,6 +45,12 @@ class FlaskServer:
 
         # 1 - Spins up the central schema manager. It will load, compile, and cache our YAML blueprints into MongoDB-compatible rules.
         schema_registry = SchemaRegistry()
+
+        # ==============================================================================
+        # AGGIUNTA: Carica lo schema per la stanza (Digital Replica)
+        # Assicurati che il percorso del file "room.yaml" corrisponda a dove lo hai salvato
+        # ==============================================================================
+        schema_registry.load_schema("room", "src/virtualization/templates/room.yaml")
         
         # 2.0 - Load the database configuration settings from the YAML file (db_config will contain a dictionary of your YAML database settings)
         db_config = ConfigLoader.load_database_config()
@@ -67,6 +75,8 @@ class FlaskServer:
         self.app.config["SCHEMA_REGISTRY"] = schema_registry
         self.app.config["DB_SERVICE"] = db_service
         self.app.config["DT_FACTORY"] = dt_factory
+        # Aggiungi questa riga per inizializzare la factory delle stanze
+        self.app.config["DR_FACTORY_ROOM"] = DRFactory("src/virtualization/templates/room.yaml")
 
 
     # ==============================================================================

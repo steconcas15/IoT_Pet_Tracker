@@ -25,31 +25,82 @@ dt_management_api = Blueprint('dt_management_api', __name__, url_prefix='/api/dt
 #                            DIGITAL TWIN APIs
 # ==============================================================================
 
-# ---------------- Route to create a new Digital Twin instance using HTTP POST -------------
+# ----------------- CREAZIONE HOME ENVIRONMENT (Main User / Admin) --------------
 @dt_api.route('/', methods=['POST'])
 def create_digital_twin():
-    """Create a new Digital Twin"""
+    """
+    Crea un nuovo ambiente virtuale Home associato univocamente a un Admin.
+    """
     try:
-        # Extract JSON data from the incoming request payload
+        # Recupera il payload inviato da Postman
         data = request.get_json()
 
-        # Define the list of fields required to create a Digital Twin
-        required_fields = ['name', 'description']
+        # Validazione dei campi obbligatori per il Pet Tracker
+        required_fields = ['name', 'description', 'user_id']
+        if not data or not all(field in data for field in required_fields):
+            return jsonify({
+                'error': 'Missing required fields. Torna su Postman e controlla di aver inserito: name, description, user_id'
+            }), 400
 
-        # Check if all required fields are present in the parsed JSON data
-        if not all(field in data for field in required_fields):
-            return jsonify({'error': 'Missing required fields'}), 400
-
-        # Invoke the Digital Twin Factory from current_app config to create the twin
+        # 1. Chiama la tua DTFactory (il codice che mi hai mostrato prima)
+        # Questo genererà l'_id unico tramite ObjectId() e salverà il twin su MongoDB
         dt_id = current_app.config['DT_FACTORY'].create_dt(
             name=data['name'],
             description=data['description']
         )
-        # Return the generated Digital Twin ID with a 201 Created status code
-        return jsonify({'dt_id': dt_id}), 201
+
+        # 2. Registra la relazione univoca tra questa specifica casa e l'utente Admin
+        current_app.config['DB_SERVICE'].set_home_admin(dt_id, data['user_id'])
+
+        # Risposta di successo con l'ID UNICO generato
+        return jsonify({
+            'status': 'success',
+            'message': 'Home environment created successfully',
+            'data': {
+                'home_id': dt_id,
+                'home_name': data['name'],
+                'admin_user_id': data['user_id'],
+                'role_assigned': 'admin'
+            }
+        }), 201
+
     except Exception as e:
-        # Catch any unexpected exceptions and return a 500 Internal Server Error
-        return jsonify({'error': str(e)}), 500
+        # Se ad esempio provi a inserire un nome duplicato, l'indice unico di MongoDB lancerà un errore qui
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to create Home Environment: {str(e)}'
+        }), 500
+
+
+# ----------------- RIMOZIONE HOME ENVIRONMENT (Admin) -----------------
+@dt_api.route('/<string:dt_id>', methods=['DELETE'])
+def delete_digital_twin(dt_id):
+    """
+    Rimuove completamente un ambiente Home e i relativi permessi.
+    """
+    try:
+        # 1. Eliminiamo il Digital Twin tramite la Factory scommentata
+        current_app.config['DT_FACTORY'].delete_dt(dt_id)
+
+        # 2. Puliamo il database rimuovendo i permessi associati a quella casa
+        current_app.config['DB_SERVICE'].remove_home_permissions(dt_id)
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Home environment {dt_id} and all its permissions successfully removed.'
+        }), 200
+
+    except ValueError as ve:
+        # Questo scatta se provi a cancellare un ID che non esiste nel DB
+        return jsonify({
+            'status': 'error',
+            'message': str(ve)
+        }), 404
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to delete Home Environment: {str(e)}'
+        }), 500
 
 # ------------- Route to fetch a specific Digital Twin's details by its ID using HTTP GET -------------
 @dt_api.route('/<dt_id>', methods=['GET'])
@@ -214,3 +265,129 @@ def register_api_blueprints(app):
     # Register Digital Twin Management and Aggregation API routes
     app.register_blueprint(dt_management_api)
 
+#--------------------------------------------- Nuove Robe -----------------------------------------
+
+# ----------------- AGGIUNTA VISUALIZZATORE (Admin) -----------------
+@dt_api.route('/<string:dt_id>/viewers', methods=['POST'])
+def add_viewer(dt_id):
+    """
+    Aggiunge un utente visualizzatore a uno specifico Home Environment.
+    """
+    try:
+        data = request.get_json()
+
+        # Validazione input
+        if not data or 'viewer_id' not in data:
+            return jsonify({
+                'error': 'Missing viewer_id in request body'
+            }), 400
+
+        viewer_id = data['viewer_id']
+
+        # 1. Verifichiamo che la casa esista prima di aggiungere permessi a caso
+        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
+        if not dt_exists:
+            return jsonify({'error': 'Home Environment not found'}), 404
+
+        # 2. Salviamo il permesso nel database
+        current_app.config['DB_SERVICE'].add_home_viewer(dt_id, viewer_id)
+
+        return jsonify({
+            'status': 'success',
+            'message': f'User {viewer_id} successfully added as viewer to Home {dt_id}',
+            'data': {
+                'home_id': dt_id,
+                'viewer_id': viewer_id,
+                'role': 'viewer'
+            }
+        }), 201
+
+    except ValueError as ve:
+        # Cattura l'errore se l'utente era già stato aggiunto
+        return jsonify({'status': 'error', 'message': str(ve)}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Failed to add viewer: {str(e)}'}), 500
+
+
+# ----------------- RIMOZIONE VISUALIZZATORE (Admin) -----------------
+@dt_api.route('/<string:dt_id>/viewers/<string:viewer_id>', methods=['DELETE'])
+def remove_viewer(dt_id, viewer_id):
+    """
+    Rimuove l'accesso come visualizzatore a un utente specifico da un Home Environment.
+    """
+    try:
+        # 1. Verifichiamo prima che la casa esista
+        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
+        if not dt_exists:
+            return jsonify({'error': 'Home Environment not found'}), 404
+
+        # 2. Rimuoviamo il permesso dal database
+        current_app.config['DB_SERVICE'].remove_home_viewer(dt_id, viewer_id)
+
+        return jsonify({
+            'status': 'success',
+            'message': f'User {viewer_id} successfully removed from viewers of Home {dt_id}'
+        }), 200
+
+    except ValueError as ve:
+        return jsonify({'status': 'error', 'message': str(ve)}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Failed to remove viewer: {str(e)}'}), 500
+
+
+# ----------------- AGGIUNTA STANZA A UNA SPECIFICA HOME (TUTTO IN 1 STEP) -----------------
+@dt_api.route('/<string:dt_id>/rooms', methods=['POST'])
+def create_and_associate_room(dt_id):
+    """
+    Crea una Digital Replica di tipo Room con configurazione Hardware
+    e la associa istantaneamente all'Home Environment (Digital Twin) in un solo passaggio.
+    """
+    try:
+        data = request.get_json()
+
+        # 1. Verifichiamo subito se la casa (Digital Twin) esiste tramite la factory
+        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
+        if not dt_exists:
+            return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
+
+        # 2. Validazioni dei campi obbligatori del profilo
+        if not data or 'name' not in data or 'floor' not in data:
+            return jsonify({'error': 'Missing mandatory fields: name and floor are required.'}), 400
+
+        # 3. Controllo limiti piano dello YAML (-1 a 2)
+        floor = data['floor']
+        if not isinstance(floor, int) or not (-1 <= floor <= 2):
+            return jsonify({'error': 'Invalid floor. Must be an integer between -1 and 2.'}), 400
+
+        # 4. Validazione dei tipi per l'hardware
+        if 'esp32cam_mac' in data and not isinstance(data['esp32cam_mac'], str):
+            return jsonify({'error': 'esp32cam_mac deve essere una stringa contenente il MAC Address.'}), 400
+
+        if 'ultrasonic_sensors' in data and not isinstance(data['ultrasonic_sensors'], list):
+            return jsonify({'error': 'ultrasonic_sensors deve essere una lista di stringhe.'}), 400
+
+        # 5. Creazione fisica del documento della stanza nella collezione corretta
+        room_id = current_app.config['DB_SERVICE'].create_room_dr(data)
+
+        # 6. ASSOCIAZIONE NATURALE: Chiamiamo la tua DTFactory per aggiornare DB e memoria
+        current_app.config['DT_FACTORY'].add_digital_replica(
+            dt_id=dt_id,
+            dr_type='room',
+            dr_id=room_id
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Room successfully created and linked to Home {dt_id} in a single step.',
+            'data': {
+                'home_id': dt_id,
+                'room_id': room_id,
+                'room_name': data['name'],
+                'floor': floor,
+                'esp32cam_device': data.get('esp32cam_mac', ''),
+                'ultrasonic_sensors': data.get('ultrasonic_sensors', [])
+            }
+        }), 201
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Failed to add room: {str(e)}'}), 500
