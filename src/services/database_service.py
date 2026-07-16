@@ -208,15 +208,17 @@ class DatabaseService:
 
     #   ---------------------- Roba Nuova ---------------------------------------------
 
-    # 1
+    # ==============================================================================
+    # 10. SET THE ADMIN OF THE HOME ENVIRONMENT
+    # ==============================================================================
     def set_home_admin(self, dt_id: str, user_id: str) -> None:
         """
-        Registra la relazione nel database associando un utente come Admin
-        di uno specifico Digital Twin (Home Environment).
+        Record the report in the database, assigning a user as Admin.
+        of a specific Digital Twin (Home Environment).
         """
         try:
-            # Accediamo a una collezione dedicata alle relazioni o ai permessi
-            # Se non esiste, MongoDB la creerà automaticamente al primo inserimento
+            # Access a collection dedicated to relationships or permissions
+            # If it does not exist, MongoDB will automatically create it upon the first insertion.
             permissions_collection = self.db["home_permissions"]
 
             permission_data = {
@@ -225,16 +227,19 @@ class DatabaseService:
                 "role": "admin"
             }
 
-            # Inseriamo il documento nel database
+            # We insert the document into the database
             permissions_collection.insert_one(permission_data)
 
         except Exception as e:
             raise Exception(f"Errore nel salvataggio dell'admin sul database: {str(e)}")
 
-    # 2
+    # ==============================================================================
+    # 11. IT DELETE THE PERMISSIONS ASSOCIATED TO THE HOME ENVIRONMENT
+    #     WHEN THE LATTER IS DELATED
+    # ==============================================================================
     def remove_home_permissions(self, dt_id: str) -> None:
         """
-        Cancella tutti i permessi (Admin e Visualizzatori) associati a una specifica Home.
+        Delete all permissions (Admin and Viewer) associated with a specific Home.
         """
         try:
             self.db["home_permissions"].delete_many({"home_id": dt_id})
@@ -242,7 +247,9 @@ class DatabaseService:
             raise Exception(f"Errore nella cancellazione dei permessi: {str(e)}")
 
 
-    # 3
+    # ==============================================================================
+    # 12. SET THE ADMIN OF THE HOME ENVIRONMENT
+    # ==============================================================================
     def add_home_viewer(self, dt_id: str, viewer_id: str) -> None:
         """
         Associa un utente come visualizzatore (viewer) a un Home Environment.
