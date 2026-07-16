@@ -339,37 +339,50 @@ def remove_viewer(dt_id, viewer_id):
 @dt_api.route('/<string:dt_id>/rooms', methods=['POST'])
 def create_and_associate_room(dt_id):
     """
-    Crea una Digital Replica di tipo Room con configurazione Hardware
-    e la associa istantaneamente all'Home Environment (Digital Twin) in un solo passaggio.
+    Crea una Digital Replica di tipo Room validando i campi con la DRFactory
+    e la associa istantaneamente all'Home Environment.
     """
     try:
-        data = request.get_json()
+        raw_data = request.get_json()
 
         # 1. Verifichiamo subito se la casa (Digital Twin) esiste tramite la factory
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
 
-        # 2. Validazioni dei campi obbligatori del profilo
-        if not data or 'name' not in data or 'floor' not in data:
-            return jsonify({'error': 'Missing mandatory fields: name and floor are required.'}), 400
+        # 2. Strutturiamo i dati flat di Postman per renderli compatibili con DRFactory
+        initial_data = {
+            "profile": {
+                "name": raw_data.get("name"),
+                "description": raw_data.get("description", ""),
+                "floor": raw_data.get("floor"),
+                # Inseriamo il permission_level nel profilo (default a "allowed" se non fornito)
+                "permission_level": raw_data.get("permission_level", "allowed")
+            },
+            "data": {
+                "esp32cam_device": raw_data.get("esp32cam_mac", ""),
+                "ultrasonic_sensors": raw_data.get("ultrasonic_sensors", [])
+            }
+        }
 
-        # 3. Controllo limiti piano dello YAML (-1 a 2)
-        floor = data['floor']
-        if not isinstance(floor, int) or not (-1 <= floor <= 2):
-            return jsonify({'error': 'Invalid floor. Must be an integer between -1 and 2.'}), 400
+        # Gestiamo opzionalmente il permission_level nei metadata se inviato
+        if "permission_level" in raw_data:
+            initial_data["metadata"] = {"permission_level": raw_data["permission_level"]}
 
-        # 4. Validazione dei tipi per l'hardware
-        if 'esp32cam_mac' in data and not isinstance(data['esp32cam_mac'], str):
-            return jsonify({'error': 'esp32cam_mac deve essere una stringa contenente il MAC Address.'}), 400
+        # 3. VALIDAZIONE PYDANTIC: deleghiamo la creazione e il controllo dello YAML alla DRFactory
+        # Se un campo obbligatorio manca o è fuori range (es. floor > 2), Pydantic lancerà un ValueError.
+        validated_room = current_app.config['DR_FACTORY_ROOM'].create_dr(
+            dr_type='room',
+            initial_data=initial_data
+        )
 
-        if 'ultrasonic_sensors' in data and not isinstance(data['ultrasonic_sensors'], list):
-            return jsonify({'error': 'ultrasonic_sensors deve essere una lista di stringhe.'}), 400
+        # 4. Salvataggio della replica validata nel database
+        room_id = current_app.config['DB_SERVICE'].save_dr(
+            dr_type='room',
+            dr_data=validated_room
+        )
 
-        # 5. Creazione fisica del documento della stanza nella collezione corretta
-        room_id = current_app.config['DB_SERVICE'].create_room_dr(data)
-
-        # 6. ASSOCIAZIONE NATURALE: Chiamiamo la tua DTFactory per aggiornare DB e memoria
+        # 5. ASSOCIAZIONE NATURALE
         current_app.config['DT_FACTORY'].add_digital_replica(
             dt_id=dt_id,
             dr_type='room',
@@ -378,16 +391,16 @@ def create_and_associate_room(dt_id):
 
         return jsonify({
             'status': 'success',
-            'message': f'Room successfully created and linked to Home {dt_id} in a single step.',
+            'message': f'Room successfully validated, created and linked to Home {dt_id}.',
             'data': {
                 'home_id': dt_id,
                 'room_id': room_id,
-                'room_name': data['name'],
-                'floor': floor,
-                'esp32cam_device': data.get('esp32cam_mac', ''),
-                'ultrasonic_sensors': data.get('ultrasonic_sensors', [])
+                'room_data': validated_room
             }
         }), 201
 
+    except ValueError as ve:
+        # Pydantic lancerà un ValueError se le regole in room.yaml non sono rispettate
+        return jsonify({'error': f'Validation failed: {str(ve)}'}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Failed to add room: {str(e)}'}), 500

@@ -210,8 +210,14 @@ class DRFactory:
                 "status",
                 "sensors",
                 "devices",
-                "medications",
-                "measurements",
+                "esp32cam_device",
+                "ultrasonic_sensors",
+                "occupancy_stats",
+                "occupancy_stats",
+                "buzzer",
+                "current_room",
+                "buzzer_status",
+                "daily_buzzer_stats"
             ]:
                 dr_dict["data"][section] = defaults
             else:
