@@ -25,34 +25,34 @@ dt_management_api = Blueprint('dt_management_api', __name__, url_prefix='/api/dt
 #                            DIGITAL TWIN APIs
 # ==============================================================================
 
-# ----------------- CREAZIONE HOME ENVIRONMENT (Main User / Admin) --------------
+# ----------------- HOME ENVIRONMENT CREATION (Main User / Admin) --------------
 @dt_api.route('/', methods=['POST'])
 def create_digital_twin():
     """
-    Crea un nuovo ambiente virtuale Home associato univocamente a un Admin.
+    Create a new virtual Home environment uniquely associated with an Admin.
     """
     try:
-        # Recupera il payload inviato da Postman
+        # Retrieve the sent payload
         data = request.get_json()
 
-        # Validazione dei campi obbligatori per il Pet Tracker
+        # Validation of mandatory fields for the Pet Tracker
         required_fields = ['name', 'description', 'user_id']
         if not data or not all(field in data for field in required_fields):
             return jsonify({
                 'error': 'Missing required fields. Torna su Postman e controlla di aver inserito: name, description, user_id'
             }), 400
 
-        # 1. Chiama la tua DTFactory (il codice che mi hai mostrato prima)
-        # Questo genererà l'_id unico tramite ObjectId() e salverà il twin su MongoDB
+        # 1. Call the DTFactory
+        # This will generate the unique _id using ObjectId() and save the twin to MongoDB
         dt_id = current_app.config['DT_FACTORY'].create_dt(
             name=data['name'],
             description=data['description']
         )
 
-        # 2. Registra la relazione univoca tra questa specifica casa e l'utente Admin
+        # 2. Record the unique relationship between this specific home and the Admin user ('set_home_admin' defined in src/services/database_service.py)
         current_app.config['DB_SERVICE'].set_home_admin(dt_id, data['user_id'])
 
-        # Risposta di successo con l'ID UNICO generato
+        # Successful response with the generated UNIQUE ID
         return jsonify({
             'status': 'success',
             'message': 'Home environment created successfully',
@@ -65,24 +65,25 @@ def create_digital_twin():
         }), 201
 
     except Exception as e:
-        # Se ad esempio provi a inserire un nome duplicato, l'indice unico di MongoDB lancerà un errore qui
+        # For example, if you try to enter a duplicate name, MongoDB's unique index will throw an error here
         return jsonify({
             'status': 'error',
             'message': f'Failed to create Home Environment: {str(e)}'
         }), 500
 
 
-# ----------------- RIMOZIONE HOME ENVIRONMENT (Admin) -----------------
+# ----------------- HOME ENVIRONMENT REMOVAL (Admin) -----------------
 @dt_api.route('/<string:dt_id>', methods=['DELETE'])
 def delete_digital_twin(dt_id):
     """
-    Rimuove completamente un ambiente Home e i relativi permessi.
+    Completely removes a Home environment and its associated permissions.
     """
     try:
-        # 1. Eliminiamo il Digital Twin tramite la Factory scommentata
+        # 1. We eliminate the Digital Twin via the Factory. ('delete_dt' defined in src/digital_twin/dt_factory.py)
         current_app.config['DT_FACTORY'].delete_dt(dt_id)
 
-        # 2. Puliamo il database rimuovendo i permessi associati a quella casa
+        # 2. Let's clean up the database by removing the permissions associated with that house ('remove_home_permissions' defined in src/services/database_service.py).
+        #    home_permissions is a collection inside the MONGOdb dataset
         current_app.config['DB_SERVICE'].remove_home_permissions(dt_id)
 
         return jsonify({
@@ -91,7 +92,7 @@ def delete_digital_twin(dt_id):
         }), 200
 
     except ValueError as ve:
-        # Questo scatta se provi a cancellare un ID che non esiste nel DB
+        # This triggers if you try to delete an ID that does not exist in the DB.
         return jsonify({
             'status': 'error',
             'message': str(ve)
@@ -101,6 +102,8 @@ def delete_digital_twin(dt_id):
             'status': 'error',
             'message': f'Failed to delete Home Environment: {str(e)}'
         }), 500
+
+
 
 # ------------- Route to fetch a specific Digital Twin's details by its ID using HTTP GET -------------
 @dt_api.route('/<dt_id>', methods=['GET'])
@@ -119,6 +122,8 @@ def get_digital_twin(dt_id):
     except Exception as e:
         # Catch any unexpected exceptions and return a 500 Internal Server Error
         return jsonify({'error': str(e)}), 500
+
+
 
 # --------------- Route to retrieve a list of all existing Digital Twins using HTTP GET --------------
 @dt_api.route('/', methods=['GET'])
