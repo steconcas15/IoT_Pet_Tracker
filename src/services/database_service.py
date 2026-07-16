@@ -248,25 +248,25 @@ class DatabaseService:
 
 
     # ==============================================================================
-    # 12. SET THE ADMIN OF THE HOME ENVIRONMENT
+    # 12. ADD HOME VIEWER TO A SPECIFIC HOME ENVIRONMENT
     # ==============================================================================
     def add_home_viewer(self, dt_id: str, viewer_id: str) -> None:
         """
-        Associa un utente come visualizzatore (viewer) a un Home Environment.
+        Associate a user as a viewer with a Home Environment.
         """
         try:
             permissions_collection = self.db["home_permissions"]
 
-            # 1. Controlliamo se l'utente ha già i permessi per questa casa
+            # 1. Check if the user already has permissions for this house.
             existing = permissions_collection.find_one({
                 "home_id": dt_id,
                 "user_id": viewer_id
             })
 
             if existing:
-                raise ValueError("Questo utente è già associato a questa casa!")
+                raise ValueError("This user is already associated with this house!")
 
-            # 2. Creiamo il nuovo permesso con ruolo 'viewer'
+            # 2. We create the new permission with the 'viewer' role.
             permission_data = {
                 "home_id": dt_id,
                 "user_id": viewer_id,
@@ -276,31 +276,33 @@ class DatabaseService:
             permissions_collection.insert_one(permission_data)
 
         except ValueError as ve:
-            # Rilanciamo l'errore di validazione (duplicato)
+            # Re-raise the validation error (duplicate)
             raise ve
         except Exception as e:
             raise Exception(f"Errore nell'aggiunta del visualizzatore al DB: {str(e)}")
 
-    # 4
+    # ==============================================================================
+    # 12. REMOVE HOME VIEWER TO A SPECIFIC HOME ENVIRONMENT
+    # ==============================================================================
     def remove_home_viewer(self, dt_id: str, viewer_id: str) -> None:
         """
-        Rimuove il ruolo di visualizzatore (viewer) di un utente specifico da una Home.
+        Removes a specific user's viewer role from a Home.
         """
         try:
             permissions_collection = self.db["home_permissions"]
 
-            # Eseguiamo una cancellazione mirata sul match di home_id, user_id e ruolo viewer
+            # Perform a targeted deletion based on the match of home_id, user_id, and the 'viewer' role.
             result = permissions_collection.delete_one({
                 "home_id": dt_id,
                 "user_id": viewer_id,
                 "role": "viewer"
             })
 
-            # Se non ha cancellato nulla, significa che l'utente non era un viewer di quella casa
+            # If nothing was deleted, it means the user was not a viewer of that house.
             if result.deleted_count == 0:
-                raise ValueError("Visualizzatore non trovato o l'utente non ha questo ruolo per questa casa.")
+                raise ValueError("Viewer not found, or the user does not have this role for this house.")
 
         except ValueError as ve:
             raise ve
         except Exception as e:
-            raise Exception(f"Errore nella rimozione del visualizzatore dal DB: {str(e)}")
+            raise Exception(f"Error removing the viewer from the DB: {str(e)}")
