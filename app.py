@@ -51,7 +51,8 @@ class FlaskServer:
         # Assicurati che il percorso del file "room.yaml" corrisponda a dove lo hai salvato
         # ==============================================================================
         schema_registry.load_schema("room", "src/virtualization/templates/room.yaml")
-        
+
+        schema_registry.load_schema("pet", "src/virtualization/templates/pet.yaml")
         # 2.0 - Load the database configuration settings from the YAML file (db_config will contain a dictionary of your YAML database settings)
         db_config = ConfigLoader.load_database_config()
 
@@ -77,6 +78,7 @@ class FlaskServer:
         self.app.config["DT_FACTORY"] = dt_factory
         # Aggiungi questa riga per inizializzare la factory delle stanze
         self.app.config["DR_FACTORY_ROOM"] = DRFactory("src/virtualization/templates/room.yaml")
+        self.app.config["DR_FACTORY_PET"] = DRFactory("src/virtualization/templates/pet.yaml")
 
 
     # ==============================================================================
