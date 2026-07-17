@@ -87,7 +87,8 @@ def create_digital_twin():
 @jwt_required()
 def delete_digital_twin(dt_id):
     """
-    Completely removes a Home environment and its associated permissions.
+    Completely removes a Home environment, its associated permissions, 
+    and cascades the deletion to all associated Digital Replicas.
     Requires Admin authorization via JWT token.
     """
     try:
@@ -101,10 +102,23 @@ def delete_digital_twin(dt_id):
                 'error': 'Unauthorized. Only the administrator can delete this Home Environment.'
             }), 403
 
-        # Check: Does the home actually exist?
+        # Check: Does the home actually exist? (We also save its data to dt_exists)
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': 'Home Environment not found'}), 404
+
+        # --- CASCADE DELETE: Removal of associated Digital Replicas ---
+        # Loop through the array of replicas linked to this home
+        for replica in dt_exists.get("digital_replicas", []):
+            try:
+                # Call the DB Service method to physically destroy the document
+                current_app.config['DB_SERVICE'].delete_dr(
+                    dr_type=replica["type"], 
+                    dr_id=replica["id"]
+                )
+            except Exception as e:
+                # Print a warning in the terminal but continue with the other deletions
+                print(f"[WARNING] Failed to delete replica {replica['id']} of type {replica['type']}: {str(e)}")
 
         # 1. Delete the Digital Twin via the Factory
         current_app.config['DT_FACTORY'].delete_dt(dt_id)
@@ -114,7 +128,7 @@ def delete_digital_twin(dt_id):
 
         return jsonify({
             'status': 'success',
-            'message': f'Home environment {dt_id} and all its permissions successfully removed.'
+            'message': f'Home environment {dt_id}, all its permissions, and all associated replicas successfully removed.'
         }), 200
 
     except Exception as e:
@@ -123,7 +137,7 @@ def delete_digital_twin(dt_id):
             'message': f'Failed to delete Home Environment: {str(e)}'
         }), 500
     
-
+    
 # ------------- Route to fetch a specific Digital Twin's details by its ID using HTTP GET -------------
 @dt_api.route('/<dt_id>', methods=['GET'])
 def get_digital_twin(dt_id):
