@@ -207,7 +207,29 @@ class DatabaseService:
 
 
     #   ---------------------- Roba Nuova ---------------------------------------------
+    # ==============================================================================
+    # 10.5. CHECK IF USER IS ADMIN OF THE HOME ENVIRONMENT
+    # ==============================================================================
+    def is_home_admin(self, dt_id: str, user_id: str) -> bool:
+        """
+        Verifica nel database se un utente ha il ruolo di 'admin' per una determinata Home.
+        """
+        try:
+            permissions_collection = self.db["home_permissions"]
+            
+            # Cerca una corrispondenza esatta di home, utente e ruolo
+            admin_record = permissions_collection.find_one({
+                "home_id": dt_id,
+                "user_id": user_id,
+                "role": "admin"
+            })
+            
+            # Ritorna True se ha trovato il record, altrimenti False
+            return admin_record is not None
 
+        except Exception as e:
+            raise Exception(f"Errore durante la verifica dei permessi admin: {str(e)}")
+    
     # ==============================================================================
     # 10. SET THE ADMIN OF THE HOME ENVIRONMENT
     # ==============================================================================
@@ -233,16 +255,35 @@ class DatabaseService:
         except Exception as e:
             raise Exception(f"Errore nel salvataggio dell'admin sul database: {str(e)}")
 
-    # ==============================================================================
-    # 11. IT DELETE THE PERMISSIONS ASSOCIATED TO THE HOME ENVIRONMENT
-    #     WHEN THE LATTER IS DELATED
+# ==============================================================================
+    # 11. IT DELETES THE PERMISSIONS ASSOCIATED TO THE HOME ENVIRONMENT
     # ==============================================================================
     def remove_home_permissions(self, dt_id: str) -> None:
         """
-        Delete all permissions (Admin and Viewer) associated with a specific Home.
+        Cancella tutti i permessi (Admin e Visualizzatori) associati a una specifica Home.
+        Gestisce eventuali conflitti tra formati String e ObjectId di MongoDB.
         """
         try:
-            self.db["home_permissions"].delete_many({"home_id": dt_id})
+            # Creiamo una query flessibile per intercettare sia stringhe normali
+            # che conversioni in ObjectId
+            query = {
+                "$or": [
+                    {"home_id": dt_id},
+                    {"home_id": ObjectId(dt_id) if ObjectId.is_valid(dt_id) else dt_id}
+                ]
+            }
+            
+            # Eseguiamo la cancellazione multipla
+            result = self.db["home_permissions"].delete_many(query)
+            
+            # (Opzionale) Stampa in console per debug: puoi controllare il terminale di Flask!
+            print(f"[DEBUG] Cancellati {result.deleted_count} permessi per la casa {dt_id}")
+
+            # Rilanciamo un'eccezione se, stranamente, non ha cancellato nulla
+            # (così Postman ti restituisce errore e capiamo il problema)
+            if result.deleted_count == 0:
+                print(f"[WARNING] Nessun permesso trovato da cancellare per home_id: {dt_id}")
+
         except Exception as e:
             raise Exception(f"Errore nella cancellazione dei permessi: {str(e)}")
 
@@ -306,3 +347,61 @@ class DatabaseService:
             raise ve
         except Exception as e:
             raise Exception(f"Error removing the viewer from the DB: {str(e)}")
+        
+    # ==============================================================================
+    # 14. IDENTITY & USER MANAGEMENT
+    # ==============================================================================
+    
+    def _init_users_collection(self) -> None:
+        """
+        Assicura che la collezione 'users' esista e che l'username sia univoco.
+        """
+        try:
+            if "users" not in self.db.list_collection_names():
+                self.db.create_collection("users")
+            # Creiamo un indice univoco: MongoDB rifiuterà in automatico i duplicati
+            self.db["users"].create_index("username", unique=True)
+        except Exception as e:
+            print(f"[WARNING] Errore nell'inizializzazione della collezione users: {str(e)}")
+
+    def create_user(self, username: str, password_hash: str) -> str:
+        """
+        Registra un nuovo utente nel database.
+        """
+        try:
+            self._init_users_collection()
+            
+            user_data = {
+                "username": username,
+                "password_hash": password_hash,
+                "created_at": datetime.utcnow()
+            }
+            
+            result = self.db["users"].insert_one(user_data)
+            return str(result.inserted_id)
+            
+        except Exception as e:
+            # Se l'indice univoco blocca l'inserimento, solleviamo un errore specifico
+            if "duplicate key error" in str(e).lower():
+                raise ValueError("Questo username è già in uso.")
+            raise Exception(f"Errore nella creazione dell'utente: {str(e)}")
+
+    def get_user_by_username(self, username: str) -> Optional[Dict]:
+        """
+        Recupera i dati di un utente tramite il suo username (usato per Login e aggiunta Viewer).
+        """
+        try:
+            return self.db["users"].find_one({"username": username})
+        except Exception as e:
+            raise Exception(f"Errore nel recupero dell'utente: {str(e)}")
+
+    def get_user_by_id(self, user_id: str) -> Optional[Dict]:
+        """
+        Recupera un utente tramite il suo ID univoco MongoDB.
+        """
+        try:
+            # Gestione sicura del formato dell'ID
+            valid_id = ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id
+            return self.db["users"].find_one({"_id": valid_id})
+        except Exception as e:
+            raise Exception(f"Errore nel recupero dell'utente: {str(e)}")

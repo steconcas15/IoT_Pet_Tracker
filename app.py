@@ -8,6 +8,8 @@ from flask import Flask  # Pulling in Flask to spin up our web server.
 # CORS is a must-have so our frontend (like React) can talk to this API.
 from flask_cors import CORS
 
+from flask_jwt_extended import JWTManager
+
 # ==============================================================================
 # 2. INTERNAL MODULES & SERVICES (Digital Twin Stack)
 # ==============================================================================
@@ -39,6 +41,13 @@ class FlaskServer:
     def __init__(self):
         self.app = Flask(__name__)
         CORS(self.app)
+
+        # --- CONFIGURAZIONE JWT ---
+        # In produzione, questa chiave dovrebbe essere caricata dal config.yaml o variabili d'ambiente
+        self.app.config['JWT_SECRET_KEY'] = '7f8a9b2d4e1c6f3a0d5b8e2c9a4f1b6d3e8c7a5f0b2d1e9c4a6b8f3d5e2c1a9b'
+        self.jwt = JWTManager(self.app)
+        # --------------------------
+
         self._init_components()
         self._register_blueprints()
 
