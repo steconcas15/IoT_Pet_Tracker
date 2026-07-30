@@ -1,0 +1,35 @@
+schemas:
+  common_fields:
+    _id: str
+    type: str
+    profile:
+      name: str
+      description: str
+    metadata:
+      created_at: datetime
+      updated_at: datetime
+  entity:
+    data:
+      related_rooms: List[str]
+
+  validations:
+    mandatory_fields:
+      root:
+        - _id
+        - type
+      profile:
+        - name
+      metadata:
+        - created_at
+        - updated_at
+
+    type_constraints:
+      related_rooms:
+        type: str
+        enum: ["allowed", "forbidden"]
+
+    initialization:
+      status: "empty"
+      occupancy_stats: []
+      profile:
+        permission_level: "allowed" # <-- Inizializzazione adattata al profilo

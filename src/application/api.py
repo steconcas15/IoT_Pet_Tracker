@@ -27,7 +27,8 @@ dr_api = Blueprint('dr_api', __name__, url_prefix='/api/dr')
 dt_management_api = Blueprint('dt_management_api', __name__, url_prefix='/api/dt-management')
 
 # Create a blueprint for Authentication APIs with a base URL prefix
-auth_api = Blueprint('auth_api', __name__, url_prefix='/api/auth')
+user_api = Blueprint('user_api', __name__, url_prefix='/api/user')
+
 
 # ==============================================================================
 #                            DIGITAL TWIN APIs
@@ -40,6 +41,7 @@ def create_digital_twin():
     """
     Creates a new virtual Home environment uniquely associated with an Admin.
     Requires a valid JWT token. Uses get_jwt_identity() to securely extract the user ID.
+    Expects JSON payload: { "name": "...", "description": "..." }
     """
     try:
         # Retrieve the JSON payload
@@ -48,7 +50,6 @@ def create_digital_twin():
         # Securely extract the user ID directly from the validated token
         current_user_id = get_jwt_identity()
 
-        # 'user_id' is removed from required_fields because we no longer trust client-side JSON for identity
         required_fields = ['name', 'description']
         if not data or not all(field in data for field in required_fields):
             return jsonify({
@@ -61,8 +62,8 @@ def create_digital_twin():
             description=data['description']
         )
 
-        # 2. Register Admin permissions using the ID securely extracted from the token
-        current_app.config['DB_SERVICE'].set_home_admin(dt_id, current_user_id)
+        # 2. Update the user profile by adding the home to owned_homes
+        current_app.config['DB_SERVICE'].add_owned_home(current_user_id, dt_id)
 
         return jsonify({
             'status': 'success',
@@ -83,59 +84,53 @@ def create_digital_twin():
 
 
 # ----------------- HOME ENVIRONMENT REMOVAL (Admin) -----------------
-@dt_api.route('/<string:dt_id>', methods=['DELETE'])
+@dt_api.route('/', methods=['DELETE'])
 @jwt_required()
-def delete_digital_twin(dt_id):
+def delete_digital_twin():
     """
-    Completely removes a Home environment, its associated permissions, 
-    and cascades the deletion to all associated Digital Replicas.
+    Completely removes a Home environment and cascades the deletion to all associated 
+    Digital Replicas. Also cleans up the home ID from all user profiles (admins and viewers).
     Requires Admin authorization via JWT token.
+    Expects JSON payload: { "dt_id": "string" }
     """
     try:
-        # Retrieve the ID of the user making the request from the Token
+        data = request.get_json()
+        if not data or 'dt_id' not in data:
+            return jsonify({'error': 'Missing required field in payload: dt_id'}), 400
+            
+        dt_id = data['dt_id']
         current_user_id = get_jwt_identity()
 
         # Check: Is the requesting user actually the admin of this home?
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
-            return jsonify({
-                'error': 'Unauthorized. Only the administrator can delete this Home Environment.'
-            }), 403
+            return jsonify({'error': 'Unauthorized. Only the administrator can delete this Home Environment.'}), 403
 
-        # Check: Does the home actually exist? (We also save its data to dt_exists)
+        # Check: Does the home actually exist? 
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': 'Home Environment not found'}), 404
 
         # --- CASCADE DELETE: Removal of associated Digital Replicas ---
-        # Loop through the array of replicas linked to this home
         for replica in dt_exists.get("digital_replicas", []):
             try:
-                # Call the DB Service method to physically destroy the document
-                current_app.config['DB_SERVICE'].delete_dr(
-                    dr_type=replica["type"], 
-                    dr_id=replica["id"]
-                )
+                current_app.config['DB_SERVICE'].delete_dr(dr_type=replica["type"], dr_id=replica["id"])
             except Exception as e:
-                # Print a warning in the terminal but continue with the other deletions
                 print(f"[WARNING] Failed to delete replica {replica['id']} of type {replica['type']}: {str(e)}")
 
         # 1. Delete the Digital Twin via the Factory
         current_app.config['DT_FACTORY'].delete_dt(dt_id)
 
-        # 2. Clean the database by removing all associated permissions (Admin and Viewers)
-        current_app.config['DB_SERVICE'].remove_home_permissions(dt_id)
+        # 2. Global Cleanup: Remove the home ID from the arrays of ALL users
+        current_app.config['DB_SERVICE'].remove_home_from_all_users(dt_id)
 
         return jsonify({
             'status': 'success',
-            'message': f'Home environment {dt_id}, all its permissions, and all associated replicas successfully removed.'
+            'message': f'Home environment {dt_id} and all associated replicas successfully removed.'
         }), 200
 
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Failed to delete Home Environment: {str(e)}'
-        }), 500
+        return jsonify({'status': 'error', 'message': f'Failed to delete Home Environment: {str(e)}'}), 500
     
 
 # ==================================================================================================
@@ -143,28 +138,26 @@ def delete_digital_twin(dt_id):
 # ==================================================================================================
 
 # ----------------- ADD VIEWER (by the Admin) -----------------
-@dt_api.route('/<string:dt_id>/viewers', methods=['POST'])
+@dt_api.route('/viewers', methods=['POST'])
 @jwt_required()
-def add_viewer(dt_id):
+def add_viewer():
     """
     Adds a viewer user to a specific Home Environment via their USERNAME.
+    Updates the viewer's 'viewable_homes' array in their profile.
     Requires a valid JWT token representing the Admin.
+    Expects JSON payload: { "dt_id": "string", "viewer_username": "string" }
     """
     try:
         data = request.get_json()
         
-        # Securely extract the user ID directly from the validated token
+        if not data or 'dt_id' not in data or 'viewer_username' not in data:
+            return jsonify({'error': 'Missing required fields: dt_id, viewer_username'}), 400
+
+        dt_id = data['dt_id']
+        viewer_username = data['viewer_username']
         current_user_id = get_jwt_identity()
 
-        # We request 'viewer_username' instead of a hard-to-read MongoDB ID
-        if not data or 'viewer_username' not in data:
-            return jsonify({
-                'error': 'Missing required fields. Please send viewer_username in the JSON body.'
-            }), 400
-
-        viewer_username = data['viewer_username']
-
-        # 1. Verify that the user making the request (extracted from the token) is actually the admin
+        # 1. Verify that the user making the request is actually the admin
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Unauthorized. Only the administrator can add viewers.'}), 403
@@ -177,27 +170,24 @@ def add_viewer(dt_id):
         # 3. Search for the viewer in the database via their username
         viewer_user = current_app.config['DB_SERVICE'].get_user_by_username(viewer_username)
         if not viewer_user:
-            return jsonify({'error': f'The user {viewer_username} is not registered on the platform.'}), 404
+            return jsonify({'error': f'The user {viewer_username} is not registered.'}), 404
         
-        # Extract the real MongoDB ID of the viewer
         viewer_id = str(viewer_user['_id'])
 
         # Prevent the admin from adding themselves as a viewer
         if viewer_id == current_user_id:
-            return jsonify({'error': 'The admin is already the owner of this home and cannot also be a viewer.'}), 400
+            return jsonify({'error': 'The admin cannot also be a viewer.'}), 400
 
-        # 4. Save the permission in the database
-        current_app.config['DB_SERVICE'].add_home_viewer(dt_id, viewer_id)
+        # Check if the user is already a viewer
+        if dt_id in viewer_user.get('data', {}).get('viewable_homes', []):
+            return jsonify({'error': 'The user is already a viewer of this home.'}), 400
+
+        # 4. Save the permission in the user's viewable_homes array
+        current_app.config['DB_SERVICE'].add_viewable_home(viewer_id, dt_id)
 
         return jsonify({
             'status': 'success',
-            'message': f'User {viewer_username} successfully added as viewer to Home {dt_id}',
-            'data': {
-                'home_id': dt_id,
-                'viewer_id': viewer_id,
-                'viewer_username': viewer_username,
-                'role': 'viewer'
-            }
+            'message': f'User {viewer_username} added as viewer to Home {dt_id}'
         }), 201
 
     except ValueError as ve:
@@ -207,15 +197,22 @@ def add_viewer(dt_id):
     
 
 # ----------------- VIEWER REMOVAL (by the Admin) -----------------
-@dt_api.route('/<string:dt_id>/viewers/<string:viewer_username>', methods=['DELETE'])
+@dt_api.route('/viewers', methods=['DELETE'])
 @jwt_required()
-def remove_viewer(dt_id, viewer_username):
+def remove_viewer():
     """
     Removes a specific user's viewer access via their USERNAME.
     Requires a valid JWT token representing the Admin.
+    Expects JSON payload: { "dt_id": "string", "viewer_username": "string" }
     """
     try:
-        # Securely extract the requesting user's ID from the token
+        data = request.get_json()
+
+        if not data or 'dt_id' not in data or 'viewer_username' not in data:
+            return jsonify({'error': 'Missing required fields: dt_id, viewer_username'}), 400
+
+        dt_id = data['dt_id']
+        viewer_username = data['viewer_username']
         current_user_id = get_jwt_identity()
 
         # Check: Is the requesting user actually the admin of this home?
@@ -223,43 +220,45 @@ def remove_viewer(dt_id, viewer_username):
         if not is_admin:
             return jsonify({'error': 'Unauthorized. Only the admin can remove viewers.'}), 403
 
-        # Check: Does the home exist?
-        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
-        if not dt_exists:
-            return jsonify({'error': 'Home Environment not found'}), 404
-
-        # Search the database to find the viewer's ID starting from their username
+        # Search the database to find the viewer
         viewer_user = current_app.config['DB_SERVICE'].get_user_by_username(viewer_username)
         if not viewer_user:
              return jsonify({'error': f'The user {viewer_username} is not registered.'}), 404
              
         viewer_id = str(viewer_user['_id'])
 
-        # Remove the permission from the database
-        current_app.config['DB_SERVICE'].remove_home_viewer(dt_id, viewer_id)
+        # Remove the permission from the user's viewable_homes array
+        current_app.config['DB_SERVICE'].remove_viewable_home(viewer_id, dt_id)
 
         return jsonify({
             'status': 'success',
-            'message': f'User {viewer_username} successfully removed from viewers of Home {dt_id}'
+            'message': f'User {viewer_username} removed from viewers of Home {dt_id}'
         }), 200
 
     except ValueError as ve:
         return jsonify({'status': 'error', 'message': str(ve)}), 404
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Failed to remove viewer: {str(e)}'}), 500
-    
+
 
 # ----------------- Adding a room to a specific home -------------------
-@dt_api.route('/<string:dt_id>/rooms', methods=['POST'])
+@dt_api.route('/rooms', methods=['POST'])
 @jwt_required()
-def create_and_associate_room(dt_id):
+def create_and_associate_room():
     """
     Creates a "Room" type Digital Replica, validating the fields using DRFactory,
     and instantly associates it with the Home Environment.
     Requires a valid JWT token representing the Admin.
+    Expects JSON payload: { "dt_id": "string", "name": "...", "floor": ... }
     """
     try:
-        # Extract the ID of the user attempting to create the room
+        raw_data = request.get_json()
+
+        if not raw_data or 'dt_id' not in raw_data:
+            return jsonify({'error': 'Missing required field in payload: dt_id'}), 400
+
+        dt_id = raw_data['dt_id']
+        room_name = raw_data.get("name") # Estraiamo il nome della stanza richiesta
         current_user_id = get_jwt_identity()
 
         # Protection: Only the admin of the home can add rooms to it
@@ -267,20 +266,28 @@ def create_and_associate_room(dt_id):
         if not is_admin:
             return jsonify({'error': 'Unauthorized. Only the home admin can add rooms.'}), 403
 
-        raw_data = request.get_json()
-
         # 1. Verify if the house (Digital Twin) exists via the factory.
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
 
+        # --- NUOVO CONTROLLO: Evitare stanze con lo stesso nome ---
+        # Controlliamo tutte le repliche digitali associate a questa casa
+        for replica in dt_exists.get("digital_replicas", []):
+            if replica.get("type") == "room":
+                # Recuperiamo i dati della stanza dal database
+                existing_room = current_app.config['DB_SERVICE'].get_dr("room", replica["id"])
+                # Se la stanza esiste e il suo nome combacia, blocchiamo la richiesta
+                if existing_room and existing_room.get("profile", {}).get("name") == room_name:
+                    return jsonify({'error': f'A room named "{room_name}" already exists in this home.'}), 409
+        # ---------------------------------------------------------
+
         # 2. Structure flat data to make it compatible with DRFactory.
         initial_data = {
             "profile": {
-                "name": raw_data.get("name"),
+                "name": room_name,
                 "description": raw_data.get("description", ""),
                 "floor": raw_data.get("floor"),
-                # Set permission_level in the profile (defaults to "allowed" if not provided)
                 "permission_level": raw_data.get("permission_level", "allowed")
             },
             "data": {
@@ -288,10 +295,6 @@ def create_and_associate_room(dt_id):
                 "ultrasonic_sensors": raw_data.get("ultrasonic_sensors", [])
             }
         }
-
-        # Optionally handle permission_level in metadata if provided (legacy support)
-        if "permission_level" in raw_data:
-            initial_data["metadata"] = {"permission_level": raw_data["permission_level"]}
 
         # 3. PYDANTIC VALIDATION: delegate creation and validation to the DRFactory.
         validated_room = current_app.config['DR_FACTORY_ROOM'].create_dr(
@@ -314,16 +317,14 @@ def create_and_associate_room(dt_id):
 
         return jsonify({
             'status': 'success',
-            'message': f'Room successfully validated, created and linked to Home {dt_id}.',
+            'message': f'Room successfully validated, created and linked.',
             'data': {
                 'home_id': dt_id,
-                'room_id': room_id,
-                'room_data': validated_room
+                'room_id': room_id
             }
         }), 201
 
     except ValueError as ve:
-        # Pydantic will raise a ValueError if the rules in room.yaml are not met.
         return jsonify({'error': f'Validation failed: {str(ve)}'}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Failed to add room: {str(e)}'}), 500
@@ -333,9 +334,9 @@ def create_and_associate_room(dt_id):
 #                            AUTHENTICATION APIs
 # ==============================================================================
 
-@auth_api.route('/register', methods=['POST'])
+@user_api.route('/register', methods=['POST'])
 def register():
-    """Register a new user on the platform."""
+    """Register a new user on the platform using the user.yaml template via DRFactory."""
     try:
         data = request.get_json()
 
@@ -348,8 +349,32 @@ def register():
         # Encrypt the password: NEVER save passwords in plain text!
         hashed_password = generate_password_hash(password)
 
-        # Save the user to the database
-        user_id = current_app.config['DB_SERVICE'].create_user(username, hashed_password)
+        # Ensure the unique index on 'profile.username' is established
+        current_app.config['DB_SERVICE']._init_users_collection()
+
+        # 1. Structure the data to make it compatible with user.yaml
+        initial_data = {
+            "profile": {
+                "username": username,
+                "password": hashed_password
+            },
+            "data": {
+                "owned_homes": [],
+                "viewable_homes": []
+            }
+        }
+
+        # 2. PYDANTIC VALIDATION: delegate creation to the DRFactory
+        validated_user = current_app.config['DR_FACTORY_USER'].create_dr(
+            dr_type='user',
+            initial_data=initial_data
+        )
+
+        # 3. Save the validated replica (the user) to the database
+        user_id = current_app.config['DB_SERVICE'].save_dr(
+            dr_type='user',
+            dr_data=validated_user
+        )
 
         return jsonify({
             'status': 'success',
@@ -361,13 +386,16 @@ def register():
         }), 201
 
     except ValueError as ve:
-        # Catch the error if the username already exists (duplicate key)
-        return jsonify({'error': str(ve)}), 409
+        # Catch Pydantic validation errors
+        return jsonify({'error': str(ve)}), 400
     except Exception as e:
+        # Catch duplicate username errors from MongoDB unique index
+        if "duplicate key error" in str(e).lower():
+            return jsonify({'error': 'This username is already in use.'}), 409
         return jsonify({'error': f'Failed to register user: {str(e)}'}), 500
 
 
-@auth_api.route('/login', methods=['POST'])
+@user_api.route('/login', methods=['POST'])
 def login():
     """Authenticate a user, verify the password, and return a JWT."""
     try:
@@ -376,11 +404,11 @@ def login():
         if not data or not data.get('username') or not data.get('password'):
             return jsonify({'error': 'Username and password are required.'}), 400
 
-        # Retrieve the user from the database
+        # Retrieve the user from the database via the nested profile.username
         user = current_app.config['DB_SERVICE'].get_user_by_username(data['username'])
 
-        # Check if the user exists and if the hashed password matches
-        if not user or not check_password_hash(user['password_hash'], data['password']):
+        # Check if the user exists and if the hashed password inside 'profile' matches
+        if not user or not check_password_hash(user['profile']['password'], data['password']):
             return jsonify({'error': 'Invalid credentials.'}), 401
 
         # Generate the token by inserting the user's stringified ID as 'identity'
@@ -390,10 +418,10 @@ def login():
         return jsonify({
             'status': 'success',
             'message': 'Login successful.',
-            'access_token': access_token,  # The token to send to the frontend for future requests
+            'access_token': access_token,
             'data': {
                 'user_id': user_id_str,
-                'username': user['username']
+                'username': user['profile']['username']
             }
         }), 200
 
@@ -401,7 +429,7 @@ def login():
         return jsonify({'error': f'Login failed: {str(e)}'}), 500
     
 
-@auth_api.route('/logout', methods=['POST'])
+@user_api.route('/logout', methods=['POST'])
 @jwt_required()
 def logout():
     """
@@ -421,8 +449,7 @@ def logout():
 
 def register_api_blueprints(app):
     """Register all API blueprints with the Flask app"""
-
     app.register_blueprint(dt_api)
     app.register_blueprint(dr_api)
     app.register_blueprint(dt_management_api)
-    app.register_blueprint(auth_api)
+    app.register_blueprint(user_api)

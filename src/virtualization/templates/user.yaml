@@ -1,0 +1,51 @@
+schemas:
+  common_fields:
+    _id: str
+    type: str
+    profile:
+      username: str
+      password: str
+    metadata:
+      created_at: datetime
+      updated_at: datetime
+      status: str
+
+  entity:
+    data:
+      owned_homes: List[str]
+      viewable_homes: List[str]
+      last_login: datetime
+
+  validations:
+    mandatory_fields:
+      root:
+        - _id
+        - type
+      profile:
+        - username
+        - password
+      metadata:
+        - created_at
+        - updated_at
+        - status
+
+    type_constraints:
+      username:
+        type: str
+      password:
+        type: str
+      status:
+        type: str
+        enum: ["active", "inactive", "suspended"]
+      owned_homes:
+        type: List[str]
+      viewable_homes:
+        type: List[str]
+      last_login:
+        type: datetime
+
+    initialization:
+      metadata:
+        status: "active"
+      owned_homes: []
+      viewable_homes: []

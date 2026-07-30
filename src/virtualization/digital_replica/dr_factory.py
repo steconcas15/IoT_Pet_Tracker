@@ -208,15 +208,9 @@ class DRFactory:
                 dr_dict["metadata"].update(defaults)
             elif section in [
                 "status",
-                "sensors",
-                "devices",
-                "esp32cam_device",
-                "ultrasonic_sensors",
                 "occupancy_stats",
-                "buzzer",
-                "current_room",
-                "buzzer_status",
-                "daily_buzzer_stats"
+                "owned_homes",
+                "viewable_homes"
             ]:
                 dr_dict["data"][section] = defaults
             else:

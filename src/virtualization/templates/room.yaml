@@ -13,8 +13,6 @@ schemas:
   entity:
     data:
       status: str
-      esp32cam_device: str
-      ultrasonic_sensors: List[str]
       occupancy_stats: List[Dict]
 
   validations:
@@ -52,8 +50,6 @@ schemas:
 
     initialization:
       status: "empty"
-      esp32cam_device: ""
-      ultrasonic_sensors: []
       occupancy_stats: []
       profile:
         permission_level: "allowed" # <-- Inizializzazione adattata al profilo
