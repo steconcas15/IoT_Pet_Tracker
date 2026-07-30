@@ -1,6 +1,9 @@
 # ==============================================================================
 #                 MODULE IMPORTS & FLASK BLUEPRINTS SETUP
 # ==============================================================================
+import os
+import json
+from werkzeug.utils import secure_filename
 
 # Import Flask dependencies for routing, requests, JSON responses, and application context
 from flask import Blueprint, request, jsonify, current_app
@@ -29,9 +32,13 @@ dt_management_api = Blueprint('dt_management_api', __name__, url_prefix='/api/dt
 # Create a blueprint for Authentication APIs with a base URL prefix
 user_api = Blueprint('user_api', __name__, url_prefix='/api/user')
 
+# Create the folder to save photos if it doesn't exist
+UPLOAD_FOLDER = 'uploads/cameras'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 
 # ==============================================================================
-#                            DIGITAL TWIN APIs
+#                            DIGITAL TWIN APIs (dt_api)
 # ==============================================================================
 
 # ----------------- HOME ENVIRONMENT CREATION (Main User / Admin) --------------
@@ -133,12 +140,12 @@ def delete_digital_twin():
         return jsonify({'status': 'error', 'message': f'Failed to delete Home Environment: {str(e)}'}), 500
     
 
-# ==================================================================================================
-#--------------------------------------------- USER ROLES & ACCESS ---------------------------------
-# ==================================================================================================
+# ==============================================================================
+#                 DIGITAL TWIN MANAGEMENT APIs (dt_management_api)
+# ==============================================================================
 
 # ----------------- ADD VIEWER (by the Admin) -----------------
-@dt_api.route('/viewers', methods=['POST'])
+@dt_management_api.route('/viewers', methods=['POST'])
 @jwt_required()
 def add_viewer():
     """
@@ -197,7 +204,7 @@ def add_viewer():
     
 
 # ----------------- VIEWER REMOVAL (by the Admin) -----------------
-@dt_api.route('/viewers', methods=['DELETE'])
+@dt_management_api.route('/viewers', methods=['DELETE'])
 @jwt_required()
 def remove_viewer():
     """
@@ -241,8 +248,12 @@ def remove_viewer():
         return jsonify({'status': 'error', 'message': f'Failed to remove viewer: {str(e)}'}), 500
 
 
-# ----------------- Adding a room to a specific home -------------------
-@dt_api.route('/rooms', methods=['POST'])
+# ==============================================================================
+#                            DIGITAL REPLICA APIs (dr_api)
+# ==============================================================================
+
+# ----------------- ADDING A ROOM TO A SPECIFIC HOME -------------------
+@dr_api.route('/rooms', methods=['POST'])
 @jwt_required()
 def create_and_associate_room():
     """
@@ -258,7 +269,7 @@ def create_and_associate_room():
             return jsonify({'error': 'Missing required field in payload: dt_id'}), 400
 
         dt_id = raw_data['dt_id']
-        room_name = raw_data.get("name") # Estraiamo il nome della stanza richiesta
+        room_name = raw_data.get("name") # Extract the requested room name
         current_user_id = get_jwt_identity()
 
         # Protection: Only the admin of the home can add rooms to it
@@ -271,13 +282,13 @@ def create_and_associate_room():
         if not dt_exists:
             return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
 
-        # --- NUOVO CONTROLLO: Evitare stanze con lo stesso nome ---
-        # Controlliamo tutte le repliche digitali associate a questa casa
+        # --- NEW CHECK: Avoid rooms with the same name ---
+        # Check all digital replicas associated with this home
         for replica in dt_exists.get("digital_replicas", []):
             if replica.get("type") == "room":
-                # Recuperiamo i dati della stanza dal database
+                # Retrieve room data from the database
                 existing_room = current_app.config['DB_SERVICE'].get_dr("room", replica["id"])
-                # Se la stanza esiste e il suo nome combacia, blocchiamo la richiesta
+                # If the room exists and its name matches, block the request
                 if existing_room and existing_room.get("profile", {}).get("name") == room_name:
                     return jsonify({'error': f'A room named "{room_name}" already exists in this home.'}), 409
         # ---------------------------------------------------------
@@ -330,8 +341,245 @@ def create_and_associate_room():
         return jsonify({'status': 'error', 'message': f'Failed to add room: {str(e)}'}), 500
 
 
+# ----------------- ADDING A DOOR TO A SPECIFIC HOME -------------------
+@dr_api.route('/doors', methods=['POST'])
+@jwt_required()
+def create_and_associate_door():
+    """
+    Creates a "Door" type Digital Replica, validating the fields using DRFactory,
+    and instantly associates it with the Home Environment.
+    Requires a valid JWT token representing the Admin.
+    Expects JSON payload: { "dt_id": "string", "name": "...", "description": "..." }
+    """
+    try:
+        raw_data = request.get_json()
+
+        if not raw_data or 'dt_id' not in raw_data or 'name' not in raw_data:
+            return jsonify({'error': 'Missing required fields in payload: dt_id, name'}), 400
+
+        dt_id = raw_data['dt_id']
+        door_name = raw_data['name']
+        current_user_id = get_jwt_identity()
+
+        # Protection: Only the admin of the home can add doors to it
+        is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
+        if not is_admin:
+            return jsonify({'error': 'Unauthorized. Only the home admin can add doors.'}), 403
+
+        # 1. Verify if the house (Digital Twin) exists via the factory.
+        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
+        if not dt_exists:
+            return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
+
+        # 2. Prevent duplicate doors with the same name inside the same home
+        for replica in dt_exists.get("digital_replicas", []):
+            if replica.get("type") == "door":
+                # Retrieve the door data from the database
+                existing_door = current_app.config['DB_SERVICE'].get_dr("door", replica["id"])
+                # If the door exists and the name matches, block the request
+                if existing_door and existing_door.get("profile", {}).get("name") == door_name:
+                    return jsonify({'error': f'A door named "{door_name}" already exists in this home.'}), 409
+
+        # 3. Structure flat data to make it compatible with DRFactory.
+        # Note: sensor_status will automatically be set to "UNKNOWN" by initialization rules in door.yaml
+        initial_data = {
+            "profile": {
+                "name": door_name,
+                "description": raw_data.get("description", "")
+            }
+        }
+
+        # 4. PYDANTIC VALIDATION: delegate creation and validation to the DRFactory.
+        validated_door = current_app.config['DR_FACTORY_DOOR'].create_dr(
+            dr_type='door',
+            initial_data=initial_data
+        )
+
+        # 5. Save the validated replica to the database
+        door_id = current_app.config['DB_SERVICE'].save_dr(
+            dr_type='door',
+            dr_data=validated_door
+        )
+
+        # 6. NATURAL ASSOCIATION: Link the new door to the Digital Twin
+        current_app.config['DT_FACTORY'].add_digital_replica(
+            dt_id=dt_id,
+            dr_type='door',
+            dr_id=door_id
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Door successfully validated, created and linked.',
+            'data': {
+                'home_id': dt_id,
+                'door_id': door_id,
+                'door_name': door_name
+            }
+        }), 201
+
+    except ValueError as ve:
+        return jsonify({'error': f'Validation failed: {str(ve)}'}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Failed to add door: {str(e)}'}), 500
+
+
+# ----------------- REMOVING A DOOR FROM A SPECIFIC HOME -------------------
+@dr_api.route('/doors', methods=['DELETE'])
+@jwt_required()
+def remove_door():
+    """
+    Removes a "Door" type Digital Replica from the Database and unlinks it from the Home.
+    Requires a valid JWT token representing the Admin.
+    Expects JSON payload: { "dt_id": "string", "door_id": "string" }
+    """
+    try:
+        raw_data = request.get_json()
+
+        if not raw_data or 'dt_id' not in raw_data or 'door_id' not in raw_data:
+            return jsonify({'error': 'Missing required fields in payload: dt_id, door_id'}), 400
+
+        dt_id = raw_data['dt_id']
+        door_id = raw_data['door_id']
+        current_user_id = get_jwt_identity()
+
+        # Protection: Only the admin of the home can remove doors
+        is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
+        if not is_admin:
+            return jsonify({'error': 'Unauthorized. Only the home admin can remove doors.'}), 403
+
+        # 1. Verify if the house (Digital Twin) exists
+        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
+        if not dt_exists:
+            return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
+
+        # 2. Check if the door is actually part of this specific Digital Twin
+        door_linked = any(
+            replica.get("id") == door_id and replica.get("type") == "door" 
+            for replica in dt_exists.get("digital_replicas", [])
+        )
+        
+        if not door_linked:
+            return jsonify({'error': 'The specified door is not linked to this Home Environment.'}), 404
+
+        # 3. Remove the specific door document from the MongoDB collection
+        current_app.config['DB_SERVICE'].delete_dr(
+            dr_type='door', 
+            dr_id=door_id
+        )
+
+        # 4. Remove the reference of the door from the Digital Twin's array
+        current_app.config['DT_FACTORY'].remove_digital_replica(
+            dt_id=dt_id,
+            dr_type='door',
+            dr_id=door_id
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Door {door_id} successfully deleted and unlinked from Home {dt_id}.'
+        }), 200
+
+    except ValueError as ve:
+        return jsonify({'error': f'Validation failed: {str(ve)}'}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Failed to delete door: {str(e)}'}), 500
+
+
+# ----------------- DEVICE AUTHENTICATION (LOGIN) -------------------
+@dr_api.route('/rooms/auth', methods=['POST'])
+def device_login():
+    """
+    Endpoint for automatic authentication of IoT devices.
+    The device sends its name. The server checks the DB and issues a JWT.
+    """
+    data = request.get_json()
+    if not data or 'room_name' not in data:
+        return jsonify({'error': 'Device credentials missing'}), 400
+
+    room_name = data.get('room_name')
+
+    # SQL/NoSQL QUERY (As per your schema): Verify that the device exists in the DB
+    db_service = current_app.config['DB_SERVICE']
+    query = {"profile.name": room_name}
+    rooms = db_service.query_drs("room", query)
+
+    if not rooms:
+        return jsonify({'error': 'Unauthorized or nonexistent device'}), 401
+
+    # HTTP 200 {JWT} (As per your schema): Generate a token without expiration (or long-lived)
+    # for the device, using "device_<room_name>" as identity
+    access_token = create_access_token(identity=f"device_{room_name}")
+    
+    return jsonify({
+        'status': 'success',
+        'access_token': access_token
+    }), 200
+
+
+# ----------------- PHOTO RECEPTION (TELEMETRY) FROM ESP32-CAM -------------------
+@dr_api.route('/rooms/telemetry', methods=['POST'])
+@jwt_required()
+def receive_telemetry():
+    """
+    Receives telemetry (JSON) and photo (JPEG) from ESP32-CAM in multipart/form-data format.
+    Requires a valid JWT token (Bearer) for authorization.
+    """
+    try:
+        # 1. Retrieve the textual part (the JSON) from the form-data
+        raw_data = request.form.get('data')
+        if not raw_data:
+            return jsonify({'error': 'JSON data field missing in the payload'}), 400
+            
+        # Parse the string into a Python dictionary
+        try:
+            telemetry_data = json.loads(raw_data)
+        except json.JSONDecodeError:
+            return jsonify({'error': 'Invalid JSON format'}), 400
+
+        home_id = telemetry_data.get('home_id')
+        room_name = telemetry_data.get('room_name')
+
+        if not home_id or not room_name:
+            return jsonify({'error': 'home_id or room_name missing in JSON'}), 400
+
+        # 2. Retrieve the image file from the form-data
+        if 'image' not in request.files:
+            return jsonify({'error': 'Image file missing in the request'}), 400
+            
+        file = request.files['image']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+
+        # 3. Save the image to disk
+        if file:
+            # Generate a unique name based on the room and current timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = secure_filename(f"{room_name}_{timestamp}.jpg")
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            # Physically save the file
+            file.save(filepath)
+            
+            # OPTIONAL: Here you could query the DB to update the Digital Replica 
+            # of the room inserting the path of the last taken photo.
+
+            return jsonify({
+                'status': 'success',
+                'message': 'Photo received and saved successfully',
+                'data': {
+                    'room_name': room_name,
+                    'saved_path': filepath
+                }
+            }), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error saving telemetry: {str(e)}'}), 500
+
+
 # ==============================================================================
-#                            AUTHENTICATION APIs
+#                            AUTHENTICATION APIs (user_api)
 # ==============================================================================
 
 @user_api.route('/register', methods=['POST'])

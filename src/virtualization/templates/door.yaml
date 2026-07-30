@@ -10,7 +10,7 @@ schemas:
       updated_at: datetime
   entity:
     data:
-      related_rooms: List[str]
+      sensor_status: str
 
   validations:
     mandatory_fields:
@@ -24,12 +24,13 @@ schemas:
         - updated_at
 
     type_constraints:
-      related_rooms:
+      sensor_status:
         type: str
-        enum: ["allowed", "forbidden"]
+        enum: ["ONLINE", "OFFLINE", "UNKNOWN"]
 
     initialization:
-      status: "empty"
-      occupancy_stats: []
+      status: "active"
       profile:
-        permission_level: "allowed" # <-- Inizializzazione adattata al profilo
+        description: "Smart Door with Ultrasonic Sensor"
+      data:
+        sensor_status: "UNKNOWN"

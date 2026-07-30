@@ -3,8 +3,7 @@
 # ==============================================================================
 
 # Pulling in Flask to spin up our web server.
-from flask import Flask  # Pulling in Flask to spin up our web server.
-
+from flask import Flask  
 # CORS is a must-have so our frontend (like React) can talk to this API.
 from flask_cors import CORS
 
@@ -20,7 +19,6 @@ from src.virtualization.digital_replica.schema_registry import SchemaRegistry
 # The heavy lifter for database interactions (queries, connections, etc.).
 from src.services.database_service import DatabaseService
 
-
 # Factory to enforce structural data integrity and schema validation via Pydantic models.
 from src.virtualization.digital_replica.dr_factory import DRFactory
 
@@ -32,6 +30,9 @@ from src.application.api import register_api_blueprints
 
 # Quick utility to grab credentials and settings from config files.
 from config.config_loader import ConfigLoader
+
+# Importa il nuovo manager MQTT che abbiamo appena creato
+from src.services.mqtt_service import MQTTManager
 
 # ==============================================================================
 # 3. SERVER INITIALIZATION & LIFECYCLE MANAGEMENT
@@ -50,6 +51,7 @@ class FlaskServer:
 
         self._init_components()
         self._register_blueprints()
+        self._init_mqtt() 
 
     def _init_components(self):
         """Initialize all required components and store them in app config"""
@@ -66,6 +68,9 @@ class FlaskServer:
         # 1.2 - Register and compile the 'user' schema for structural validation and data mapping.
         schema_registry.load_schema("user", "src/virtualization/templates/user.yaml")
         
+        # 1.3 - Register and compile the 'door' schema for the new MQTT-enabled doors.
+        schema_registry.load_schema("door", "src/virtualization/templates/door.yaml")
+        
         # 2.0 - Load the database configuration settings from the YAML file (db_config will contain a dictionary of your YAML database settings)
         db_config = ConfigLoader.load_database_config()
 
@@ -78,30 +83,46 @@ class FlaskServer:
             db_name=db_config["settings"]["name"],
             schema_registry=schema_registry,
         )
-
+        
         # 2.3 - Open the physical pipe (tubo) to the database.
         db_service.connect()
 
-        # 3- Hand over the DB and schemas to the factory to forge our Digital Twins.
+        # 3 - Hand over the DB and schemas to the factory to forge our Digital Twins.
         dt_factory = DTFactory(db_service, schema_registry)
 
-        # Store references
+        # Store references in the app configuration
         self.app.config["SCHEMA_REGISTRY"] = schema_registry
         self.app.config["DB_SERVICE"] = db_service
         self.app.config["DT_FACTORY"] = dt_factory
-        # Aggiungi questa riga per inizializzare la factory delle stanze
+        
+        # Initialize the factories for data validation
         self.app.config["DR_FACTORY_ROOM"] = DRFactory("src/virtualization/templates/room.yaml")
         self.app.config["DR_FACTORY_PET"]  = DRFactory("src/virtualization/templates/pet.yaml")
         self.app.config["DR_FACTORY_USER"] = DRFactory("src/virtualization/templates/user.yaml")
+        
+        # Aggiungi questa riga per inizializzare la factory delle porte (MQTT)
+        self.app.config["DR_FACTORY_DOOR"] = DRFactory("src/virtualization/templates/door.yaml")
 
-
+    def _init_mqtt(self):
+        """Inizializza il gestore MQTT delegando la logica al servizio esterno"""
+        self.mqtt_manager = MQTTManager(self.app) #[cite: 2]
+        
+        # 1. Carica la configurazione dal file separato
+        mqtt_config = ConfigLoader.load_mqtt_config()
+        
+        # 2. Avvia il servizio passando i parametri
+        self.mqtt_manager.start(
+            broker=mqtt_config.get("broker"),
+            port=mqtt_config.get("port"),
+            username=mqtt_config.get("username"),
+            password=mqtt_config.get("password")
+        )
 
     # ==============================================================================
     #                  API REGISTRATION & SERVER RUNTIME METHODS
     # ==============================================================================
     def _register_blueprints(self):
         """Register all API blueprints"""
-
         # Call the registration function in api.py, passing this app to bind all routes (dt_api, dr_api, dt_management_api)
         register_api_blueprints(self.app)
 
@@ -116,6 +137,10 @@ class FlaskServer:
             if "DB_SERVICE" in self.app.config:
                 # Safely disconnect the database connection pipe when the Flask server stops
                 self.app.config["DB_SERVICE"].disconnect()
+            
+            # Arresta il servizio MQTT in modo pulito alla chiusura del server
+            if hasattr(self, 'mqtt_manager'):
+                self.mqtt_manager.stop()
 
 
 # ==============================================================================

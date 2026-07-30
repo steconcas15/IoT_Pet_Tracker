@@ -1,0 +1,5 @@
+mqtt:
+  broker: "f91c2f750c5d4d2c9ff2177772a4ea75.s1.eu.hivemq.cloud"
+  port: 8883
+  username: "PetTracker"
+  password: "PetTracker26"

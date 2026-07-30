@@ -54,3 +54,14 @@ class ConfigLoader:
 
         # Assemble and return the complete MongoDB connection URI (in our case it returns "mongodb://localhost:27017")
         return f"mongodb://{auth}{host}:{port}"
+    
+
+    @staticmethod
+    def load_mqtt_config(file_path="config/mqtt_config.yaml"):
+        """Carica le credenziali e le impostazioni MQTT dal file YAML."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File di configurazione MQTT non trovato: {file_path}")
+        
+        with open(file_path, "r") as file:
+            config = yaml.safe_load(file)
+            return config.get("mqtt", {})
