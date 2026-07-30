@@ -5,15 +5,17 @@ from ultralytics import YOLO
 class PetDetector:
 
     def __init__(self):
-        """Initializes the detector with a hardcoded, fixed model path.
+        """Initializes the detector with the Large model.
 
-        The main application doesn't need to know where the weights are.
-        Using the powerful YOLO11x model for maximum precision.
+        Using the YOLO11l model for a great balance between 
+        high precision and manageable file size.
         """
-        self.model_path = "weights/yolo11x.pt"
+        # Passiamo al modello Large. 
+        # Ultralytics lo scaricherà in automatico se non lo trova.
+        self.model_name = "yolo11l.pt"
 
-        print(f"[YOLO] Loading fixed model from {self.model_path}...")
-        self.model = YOLO(self.model_path)
+        print(f"[YOLO] Loading Large model: {self.model_name}...")
+        self.model = YOLO(self.model_name)
 
         # Text mapping for standard COCO dataset classes (English only)
         self.class_mapping = {
