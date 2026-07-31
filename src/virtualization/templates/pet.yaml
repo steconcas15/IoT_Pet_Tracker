@@ -23,7 +23,6 @@ schemas:
         - type
       profile:
         - name
-        - species
       metadata:
         - created_at
         - updated_at

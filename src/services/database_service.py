@@ -225,28 +225,6 @@ class DatabaseService:
             raise Exception(f"Errore durante la verifica dei permessi admin: {str(e)}")
 
     # ==============================================================================
-    # 11. GESTIONE CASE POSSEDUTE (OWNED HOMES)
-    # ==============================================================================
-    def add_owned_home(self, user_id: str, dt_id: str) -> None:
-        """Aggiunge una casa alle owned_homes dell'utente."""
-        try:
-            collection_name = self.schema_registry.get_collection_name("user")
-            valid_id = ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id
-            
-            # $addToSet evita di inserire duplicati nell'array
-            result = self.db[collection_name].update_one(
-                {"_id": valid_id},
-                {
-                    "$addToSet": {"data.owned_homes": dt_id},
-                    "$set": {"metadata.updated_at": datetime.utcnow()}
-                }
-            )
-            if result.matched_count == 0:
-                raise ValueError("Utente non trovato.")
-        except Exception as e:
-            raise Exception(f"Errore nell'aggiunta della casa posseduta: {str(e)}")
-
-    # ==============================================================================
     # 12. GESTIONE CASE IN VISUALIZZAZIONE (VIEWABLE HOMES)
     # ==============================================================================
     def add_viewable_home(self, user_id: str, dt_id: str) -> None:

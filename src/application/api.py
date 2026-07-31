@@ -70,7 +70,15 @@ def create_digital_twin():
         )
 
         # 2. Update the user profile by adding the home to owned_homes
-        current_app.config['DB_SERVICE'].add_owned_home(current_user_id, dt_id)
+        doc = current_app.config['DB_SERVICE'].get_dr(dr_type='user', dr_id=current_user_id)
+        current_homes = doc.get('data', {}).get('owned_homes', [])
+        updated_homes = current_homes + [dt_id]
+        current_app.config['DB_SERVICE'].update_dr(
+            dr_type='user',
+            dr_id=current_user_id,
+            update_data={'data.owned_homes': updated_homes}
+        )
+        
 
         return jsonify({
             'status': 'success',
@@ -256,42 +264,52 @@ def remove_viewer():
 @jwt_required()
 def create_and_associate_dr(dr_type):
     """
-    Crea una Digital Replica (es. 'room', 'door') e la associa istantaneamente 
-    al Digital Twin (Home Environment).
+    Crea una Digital Replica universale in base al dr_type fornito nell'URL 
+    e la associa istantaneamente al Digital Twin (Home Environment).
     """
     try:
-        # 1. Filtro di sicurezza per i tipi di DR consentiti
-        allowed_dr_types = ['room', 'door', 'pet']
-        if dr_type not in allowed_dr_types:
-            return jsonify({'error': f'Tipo di Digital Replica non supportato: {dr_type}'}), 400
+        raw_data = request.get_json() or {}
 
-        raw_data = request.get_json()
-
-        if not raw_data or 'dt_id' not in raw_data or 'name' not in raw_data:
+        # 1. Validazione di Base
+        if 'dt_id' not in raw_data or 'name' not in raw_data:
             return jsonify({'error': 'Campi obbligatori mancanti: dt_id, name'}), 400
 
         dt_id = raw_data['dt_id']
         dr_name = raw_data['name']
         current_user_id = get_jwt_identity()
 
-        # 2. Controllo Autorizzazioni (Solo Admin)
+        # 2. Controllo Esistenza Factory Dinamica
+        factory_key = f'DR_FACTORY_{dr_type.upper()}'
+        dr_factory = current_app.config.get(factory_key)
+        
+        if not dr_factory:
+            return jsonify({'error': f'Tipo di Digital Replica non supportato o configurazione mancante: {dr_type}'}), 400
+
+        # 3. Controllo Autorizzazioni (Solo Admin)
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Non autorizzato. Solo l\'amministratore può aggiungere repliche.'}), 403
 
-        # 3. Verifica esistenza Digital Twin
+        # 4. Verifica Esistenza Digital Twin
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': f'Home Environment con ID {dt_id} non trovato'}), 404
 
-        # 4. Controllo Duplicati: Evita repliche con lo stesso nome e tipo nella stessa casa
+        # 5. Controllo Duplicati e Vincoli Specifici
         for replica in dt_exists.get("digital_replicas", []):
             if replica.get("type") == dr_type:
+                
+                # --- NUOVO VINCOLO: Massimo 1 Pet per Casa ---
+                if dr_type == 'pet':
+                    return jsonify({'error': 'Questa casa ha già un pet associato. È consentito un solo pet per Home Environment.'}), 409
+                # ---------------------------------------------
+                
+                # Controllo nome duplicato (es. due "Cucina" o due "Porta Principale")
                 existing_dr = current_app.config['DB_SERVICE'].get_dr(dr_type, replica["id"])
                 if existing_dr and existing_dr.get("profile", {}).get("name") == dr_name:
                     return jsonify({'error': f'Un(a) {dr_type} con il nome "{dr_name}" esiste già in questa casa.'}), 409
 
-        # 5. Costruzione Dinamica del Payload Iniziale
+        # 6. Costruzione Dinamica del Payload Iniziale
         initial_data = {
             "profile": {
                 "name": dr_name,
@@ -299,52 +317,24 @@ def create_and_associate_dr(dr_type):
             }
         }
         
-        # --- CORREZIONI BASATE SUI TEMPLATE YAML ---
-        if dr_type == 'room':
-            # Controllo del campo mandatory 'floor'
-            if 'floor' not in raw_data:
-                return jsonify({'error': 'Campo obbligatorio mancante per la stanza: floor'}), 400
-            
-            initial_data["profile"]["floor"] = raw_data.get("floor")
-            initial_data["profile"]["permission_level"] = raw_data.get("permission_level", "allowed")
-            
-            # Non viene passato nulla in "data" perché status e occupancy_stats
-            # vengono generati dalla sezione initialization del template.
+        # Travaso dati dinamico per la validazione di Pydantic
+        for key, value in raw_data.items():
+            if key not in ['dt_id', 'name', 'description']:
+                initial_data["profile"][key] = value
 
-        elif dr_type == 'door':
-            # La porta non richiede ulteriori campi in fase di creazione oltre a profile.
-            # sensor_status viene inizializzato a UNKNOWN dal template.
-            pass
-
-        # --- AGGIUNTA PER IL PET ---
-        elif dr_type == 'pet':
-            if 'species' not in raw_data:
-                return jsonify({'error': 'Campo obbligatorio mancante per il pet: species'}), 400
-            # Inserisce la specie per validare correttamente il profilo in base a pet.yaml
-            initial_data["profile"]["species"] = raw_data.get("species") #[cite: 7]
-        # ---------------------------   
-        # -------------------------------------------
-
-        # 6. Validazione Pydantic tramite la Factory corretta
-        # Ricava dinamicamente la factory dalla configurazione (es. 'DR_FACTORY_ROOM')
-        factory_key = f'DR_FACTORY_{dr_type.upper()}'
-        dr_factory = current_app.config.get(factory_key)
-        
-        if not dr_factory:
-            return jsonify({'error': f'Configurazione Factory mancante per {dr_type}'}), 500
-
+        # 7. Validazione Pydantic
         validated_dr = dr_factory.create_dr(
             dr_type=dr_type,
             initial_data=initial_data
         )
 
-        # 7. Salvataggio nel Database
+        # 8. Salvataggio nel Database
         dr_id = current_app.config['DB_SERVICE'].save_dr(
             dr_type=dr_type,
             dr_data=validated_dr
         )
 
-        # 8. Associazione al Digital Twin
+        # 9. Associazione al Digital Twin
         current_app.config['DT_FACTORY'].add_digital_replica(
             dt_id=dt_id,
             dr_type=dr_type,
@@ -365,6 +355,7 @@ def create_and_associate_dr(dr_type):
         return jsonify({'error': f'Validazione fallita: {str(ve)}'}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Errore durante la creazione di {dr_type}: {str(e)}'}), 500
+
     
 
 @dr_api.route('/<dr_type>', methods=['DELETE'])
@@ -372,47 +363,50 @@ def create_and_associate_dr(dr_type):
 def remove_digital_replica(dr_type):
     """
     Rimuove una Digital Replica specifica dal Database e la scollega dall'Home Environment.
+    Supporta dinamicamente tutti i tipi di DR registrati nel sistema.
     """
     try:
-        allowed_dr_types = ['room', 'door', 'pet']
-        if dr_type not in allowed_dr_types:
+        # 1. Verifica dinamica se il tipo di DR è supportato
+        factory_key = f'DR_FACTORY_{dr_type.upper()}'
+        if factory_key not in current_app.config:
             return jsonify({'error': f'Tipo di Digital Replica non supportato: {dr_type}'}), 400
 
-        raw_data = request.get_json()
+        raw_data = request.get_json() or {}
 
-        if not raw_data or 'dt_id' not in raw_data or 'dr_id' not in raw_data:
+        # 2. Controllo campi base
+        if 'dt_id' not in raw_data or 'dr_id' not in raw_data:
             return jsonify({'error': 'Campi obbligatori mancanti: dt_id, dr_id'}), 400
 
         dt_id = raw_data['dt_id']
         dr_id = raw_data['dr_id']
         current_user_id = get_jwt_identity()
 
-        # Controllo Autorizzazioni (Solo Admin)
+        # 3. Controllo Autorizzazioni (Solo Admin)
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Non autorizzato. Solo l\'admin può rimuovere i componenti.'}), 403
 
-        # Verifica esistenza Digital Twin
+        # 4. Verifica esistenza Digital Twin
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': f'Home Environment con ID {dt_id} non trovato'}), 404
 
-        # Verifica che la replica appartenga effettivamente a questo Digital Twin
+        # 5. Verifica che la replica appartenga effettivamente a questo Digital Twin
         dr_linked = any(
             replica.get("id") == dr_id and replica.get("type") == dr_type 
             for replica in dt_exists.get("digital_replicas", [])
         )
         
         if not dr_linked:
-            return jsonify({'error': f'{dr_type.capitalize()} specificato non collegato a questa Casa.'}), 404
+            return jsonify({'error': f'{dr_type.capitalize()} specificato non è collegato a questa Casa.'}), 404
 
-        # Rimozione dal Database (questo mantiene dr_type perché richiesto da db_service)
+        # 6. Rimozione dal Database
         current_app.config['DB_SERVICE'].delete_dr(
             dr_type=dr_type, 
             dr_id=dr_id
         )
 
-        # Disassociazione dal Digital Twin (MODIFICATO QUI: rimosso dr_type)
+        # 7. Disassociazione dal Digital Twin
         current_app.config['DT_FACTORY'].remove_digital_replica(
             dt_id=dt_id,
             dr_id=dr_id
@@ -426,10 +420,9 @@ def remove_digital_replica(dr_type):
     except ValueError as ve:
         return jsonify({'error': f'Validazione fallita: {str(ve)}'}), 404
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Errore durante l\'eliminazione: {str(e)}'}), 500
-        
+        return jsonify({'status': 'error', 'message': f'Errore durante l\'eliminazione: {str(e)}'}), 500        
 
-# ----------------- DEVICE AUTHENTICATION (LOGIN) -------------------
+# ----------------- CAMERA DEVICE AUTHENTICATION -------------------
 @dr_api.route('/rooms/auth', methods=['POST'])
 def device_login():
     """
