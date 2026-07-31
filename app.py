@@ -34,6 +34,8 @@ from config.config_loader import ConfigLoader
 # Importa il nuovo manager MQTT che abbiamo appena creato
 from src.services.mqtt_service import MQTTManager
 
+from vision_model.model import PetDetector
+
 # ==============================================================================
 # 3. SERVER INITIALIZATION & LIFECYCLE MANAGEMENT
 # ==============================================================================
@@ -102,6 +104,8 @@ class FlaskServer:
         
         # Aggiungi questa riga per inizializzare la factory delle porte (MQTT)
         self.app.config["DR_FACTORY_DOOR"] = DRFactory("src/virtualization/templates/door.yaml")
+
+        self.app.config["PET_DETECTOR"] = PetDetector()
 
     def _init_mqtt(self):
         """Inizializza il gestore MQTT delegando la logica al servizio esterno"""

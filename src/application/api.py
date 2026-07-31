@@ -252,239 +252,182 @@ def remove_viewer():
 #                            DIGITAL REPLICA APIs (dr_api)
 # ==============================================================================
 
-# ----------------- ADDING A ROOM TO A SPECIFIC HOME -------------------
-@dr_api.route('/rooms', methods=['POST'])
+@dr_api.route('/<dr_type>', methods=['POST'])
 @jwt_required()
-def create_and_associate_room():
+def create_and_associate_dr(dr_type):
     """
-    Creates a "Room" type Digital Replica, validating the fields using DRFactory,
-    and instantly associates it with the Home Environment.
-    Requires a valid JWT token representing the Admin.
-    Expects JSON payload: { "dt_id": "string", "name": "...", "floor": ... }
+    Crea una Digital Replica (es. 'room', 'door') e la associa istantaneamente 
+    al Digital Twin (Home Environment).
     """
     try:
-        raw_data = request.get_json()
+        # 1. Filtro di sicurezza per i tipi di DR consentiti
+        allowed_dr_types = ['room', 'door', 'pet']
+        if dr_type not in allowed_dr_types:
+            return jsonify({'error': f'Tipo di Digital Replica non supportato: {dr_type}'}), 400
 
-        if not raw_data or 'dt_id' not in raw_data:
-            return jsonify({'error': 'Missing required field in payload: dt_id'}), 400
-
-        dt_id = raw_data['dt_id']
-        room_name = raw_data.get("name") # Extract the requested room name
-        current_user_id = get_jwt_identity()
-
-        # Protection: Only the admin of the home can add rooms to it
-        is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
-        if not is_admin:
-            return jsonify({'error': 'Unauthorized. Only the home admin can add rooms.'}), 403
-
-        # 1. Verify if the house (Digital Twin) exists via the factory.
-        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
-        if not dt_exists:
-            return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
-
-        # --- NEW CHECK: Avoid rooms with the same name ---
-        # Check all digital replicas associated with this home
-        for replica in dt_exists.get("digital_replicas", []):
-            if replica.get("type") == "room":
-                # Retrieve room data from the database
-                existing_room = current_app.config['DB_SERVICE'].get_dr("room", replica["id"])
-                # If the room exists and its name matches, block the request
-                if existing_room and existing_room.get("profile", {}).get("name") == room_name:
-                    return jsonify({'error': f'A room named "{room_name}" already exists in this home.'}), 409
-        # ---------------------------------------------------------
-
-        # 2. Structure flat data to make it compatible with DRFactory.
-        initial_data = {
-            "profile": {
-                "name": room_name,
-                "description": raw_data.get("description", ""),
-                "floor": raw_data.get("floor"),
-                "permission_level": raw_data.get("permission_level", "allowed")
-            },
-            "data": {
-                "esp32cam_device": raw_data.get("esp32cam_mac", ""),
-                "ultrasonic_sensors": raw_data.get("ultrasonic_sensors", [])
-            }
-        }
-
-        # 3. PYDANTIC VALIDATION: delegate creation and validation to the DRFactory.
-        validated_room = current_app.config['DR_FACTORY_ROOM'].create_dr(
-            dr_type='room',
-            initial_data=initial_data
-        )
-
-        # 4. Save the validated replica to the database
-        room_id = current_app.config['DB_SERVICE'].save_dr(
-            dr_type='room',
-            dr_data=validated_room
-        )
-
-        # 5. NATURAL ASSOCIATION: Link the new room to the Digital Twin
-        current_app.config['DT_FACTORY'].add_digital_replica(
-            dt_id=dt_id,
-            dr_type='room',
-            dr_id=room_id
-        )
-
-        return jsonify({
-            'status': 'success',
-            'message': f'Room successfully validated, created and linked.',
-            'data': {
-                'home_id': dt_id,
-                'room_id': room_id
-            }
-        }), 201
-
-    except ValueError as ve:
-        return jsonify({'error': f'Validation failed: {str(ve)}'}), 400
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to add room: {str(e)}'}), 500
-
-
-# ----------------- ADDING A DOOR TO A SPECIFIC HOME -------------------
-@dr_api.route('/doors', methods=['POST'])
-@jwt_required()
-def create_and_associate_door():
-    """
-    Creates a "Door" type Digital Replica, validating the fields using DRFactory,
-    and instantly associates it with the Home Environment.
-    Requires a valid JWT token representing the Admin.
-    Expects JSON payload: { "dt_id": "string", "name": "...", "description": "..." }
-    """
-    try:
         raw_data = request.get_json()
 
         if not raw_data or 'dt_id' not in raw_data or 'name' not in raw_data:
-            return jsonify({'error': 'Missing required fields in payload: dt_id, name'}), 400
+            return jsonify({'error': 'Campi obbligatori mancanti: dt_id, name'}), 400
 
         dt_id = raw_data['dt_id']
-        door_name = raw_data['name']
+        dr_name = raw_data['name']
         current_user_id = get_jwt_identity()
 
-        # Protection: Only the admin of the home can add doors to it
+        # 2. Controllo Autorizzazioni (Solo Admin)
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
-            return jsonify({'error': 'Unauthorized. Only the home admin can add doors.'}), 403
+            return jsonify({'error': 'Non autorizzato. Solo l\'amministratore può aggiungere repliche.'}), 403
 
-        # 1. Verify if the house (Digital Twin) exists via the factory.
+        # 3. Verifica esistenza Digital Twin
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
-            return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
+            return jsonify({'error': f'Home Environment con ID {dt_id} non trovato'}), 404
 
-        # 2. Prevent duplicate doors with the same name inside the same home
+        # 4. Controllo Duplicati: Evita repliche con lo stesso nome e tipo nella stessa casa
         for replica in dt_exists.get("digital_replicas", []):
-            if replica.get("type") == "door":
-                # Retrieve the door data from the database
-                existing_door = current_app.config['DB_SERVICE'].get_dr("door", replica["id"])
-                # If the door exists and the name matches, block the request
-                if existing_door and existing_door.get("profile", {}).get("name") == door_name:
-                    return jsonify({'error': f'A door named "{door_name}" already exists in this home.'}), 409
+            if replica.get("type") == dr_type:
+                existing_dr = current_app.config['DB_SERVICE'].get_dr(dr_type, replica["id"])
+                if existing_dr and existing_dr.get("profile", {}).get("name") == dr_name:
+                    return jsonify({'error': f'Un(a) {dr_type} con il nome "{dr_name}" esiste già in questa casa.'}), 409
 
-        # 3. Structure flat data to make it compatible with DRFactory.
-        # Note: sensor_status will automatically be set to "UNKNOWN" by initialization rules in door.yaml
+        # 5. Costruzione Dinamica del Payload Iniziale
         initial_data = {
             "profile": {
-                "name": door_name,
+                "name": dr_name,
                 "description": raw_data.get("description", "")
             }
         }
+        
+        # --- CORREZIONI BASATE SUI TEMPLATE YAML ---
+        if dr_type == 'room':
+            # Controllo del campo mandatory 'floor'
+            if 'floor' not in raw_data:
+                return jsonify({'error': 'Campo obbligatorio mancante per la stanza: floor'}), 400
+            
+            initial_data["profile"]["floor"] = raw_data.get("floor")
+            initial_data["profile"]["permission_level"] = raw_data.get("permission_level", "allowed")
+            
+            # Non viene passato nulla in "data" perché status e occupancy_stats
+            # vengono generati dalla sezione initialization del template.
 
-        # 4. PYDANTIC VALIDATION: delegate creation and validation to the DRFactory.
-        validated_door = current_app.config['DR_FACTORY_DOOR'].create_dr(
-            dr_type='door',
+        elif dr_type == 'door':
+            # La porta non richiede ulteriori campi in fase di creazione oltre a profile.
+            # sensor_status viene inizializzato a UNKNOWN dal template.
+            pass
+
+        # --- AGGIUNTA PER IL PET ---
+        elif dr_type == 'pet':
+            if 'species' not in raw_data:
+                return jsonify({'error': 'Campo obbligatorio mancante per il pet: species'}), 400
+            # Inserisce la specie per validare correttamente il profilo in base a pet.yaml
+            initial_data["profile"]["species"] = raw_data.get("species") #[cite: 7]
+        # ---------------------------   
+        # -------------------------------------------
+
+        # 6. Validazione Pydantic tramite la Factory corretta
+        # Ricava dinamicamente la factory dalla configurazione (es. 'DR_FACTORY_ROOM')
+        factory_key = f'DR_FACTORY_{dr_type.upper()}'
+        dr_factory = current_app.config.get(factory_key)
+        
+        if not dr_factory:
+            return jsonify({'error': f'Configurazione Factory mancante per {dr_type}'}), 500
+
+        validated_dr = dr_factory.create_dr(
+            dr_type=dr_type,
             initial_data=initial_data
         )
 
-        # 5. Save the validated replica to the database
-        door_id = current_app.config['DB_SERVICE'].save_dr(
-            dr_type='door',
-            dr_data=validated_door
+        # 7. Salvataggio nel Database
+        dr_id = current_app.config['DB_SERVICE'].save_dr(
+            dr_type=dr_type,
+            dr_data=validated_dr
         )
 
-        # 6. NATURAL ASSOCIATION: Link the new door to the Digital Twin
+        # 8. Associazione al Digital Twin
         current_app.config['DT_FACTORY'].add_digital_replica(
             dt_id=dt_id,
-            dr_type='door',
-            dr_id=door_id
+            dr_type=dr_type,
+            dr_id=dr_id
         )
 
         return jsonify({
             'status': 'success',
-            'message': f'Door successfully validated, created and linked.',
+            'message': f'{dr_type.capitalize()} validato(a), creato(a) e collegato(a) con successo.',
             'data': {
                 'home_id': dt_id,
-                'door_id': door_id,
-                'door_name': door_name
+                f'{dr_type}_id': dr_id,
+                'name': dr_name
             }
         }), 201
 
     except ValueError as ve:
-        return jsonify({'error': f'Validation failed: {str(ve)}'}), 400
+        return jsonify({'error': f'Validazione fallita: {str(ve)}'}), 400
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to add door: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'Errore durante la creazione di {dr_type}: {str(e)}'}), 500
+    
 
-
-# ----------------- REMOVING A DOOR FROM A SPECIFIC HOME -------------------
-@dr_api.route('/doors', methods=['DELETE'])
+@dr_api.route('/<dr_type>', methods=['DELETE'])
 @jwt_required()
-def remove_door():
+def remove_digital_replica(dr_type):
     """
-    Removes a "Door" type Digital Replica from the Database and unlinks it from the Home.
-    Requires a valid JWT token representing the Admin.
-    Expects JSON payload: { "dt_id": "string", "door_id": "string" }
+    Rimuove una Digital Replica specifica dal Database e la scollega dall'Home Environment.
     """
     try:
+        allowed_dr_types = ['room', 'door', 'pet']
+        if dr_type not in allowed_dr_types:
+            return jsonify({'error': f'Tipo di Digital Replica non supportato: {dr_type}'}), 400
+
         raw_data = request.get_json()
 
-        if not raw_data or 'dt_id' not in raw_data or 'door_id' not in raw_data:
-            return jsonify({'error': 'Missing required fields in payload: dt_id, door_id'}), 400
+        if not raw_data or 'dt_id' not in raw_data or 'dr_id' not in raw_data:
+            return jsonify({'error': 'Campi obbligatori mancanti: dt_id, dr_id'}), 400
 
         dt_id = raw_data['dt_id']
-        door_id = raw_data['door_id']
+        dr_id = raw_data['dr_id']
         current_user_id = get_jwt_identity()
 
-        # Protection: Only the admin of the home can remove doors
+        # Controllo Autorizzazioni (Solo Admin)
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
-            return jsonify({'error': 'Unauthorized. Only the home admin can remove doors.'}), 403
+            return jsonify({'error': 'Non autorizzato. Solo l\'admin può rimuovere i componenti.'}), 403
 
-        # 1. Verify if the house (Digital Twin) exists
+        # Verifica esistenza Digital Twin
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
-            return jsonify({'error': f'Home Environment with ID {dt_id} not found'}), 404
+            return jsonify({'error': f'Home Environment con ID {dt_id} non trovato'}), 404
 
-        # 2. Check if the door is actually part of this specific Digital Twin
-        door_linked = any(
-            replica.get("id") == door_id and replica.get("type") == "door" 
+        # Verifica che la replica appartenga effettivamente a questo Digital Twin
+        dr_linked = any(
+            replica.get("id") == dr_id and replica.get("type") == dr_type 
             for replica in dt_exists.get("digital_replicas", [])
         )
         
-        if not door_linked:
-            return jsonify({'error': 'The specified door is not linked to this Home Environment.'}), 404
+        if not dr_linked:
+            return jsonify({'error': f'{dr_type.capitalize()} specificato non collegato a questa Casa.'}), 404
 
-        # 3. Remove the specific door document from the MongoDB collection
+        # Rimozione dal Database (questo mantiene dr_type perché richiesto da db_service)
         current_app.config['DB_SERVICE'].delete_dr(
-            dr_type='door', 
-            dr_id=door_id
+            dr_type=dr_type, 
+            dr_id=dr_id
         )
 
-        # 4. Remove the reference of the door from the Digital Twin's array
+        # Disassociazione dal Digital Twin (MODIFICATO QUI: rimosso dr_type)
         current_app.config['DT_FACTORY'].remove_digital_replica(
             dt_id=dt_id,
-            dr_type='door',
-            dr_id=door_id
+            dr_id=dr_id
         )
 
         return jsonify({
             'status': 'success',
-            'message': f'Door {door_id} successfully deleted and unlinked from Home {dt_id}.'
+            'message': f'{dr_type.capitalize()} {dr_id} eliminato(a) e scollegato(a) da Home {dt_id}.'
         }), 200
 
     except ValueError as ve:
-        return jsonify({'error': f'Validation failed: {str(ve)}'}), 404
+        return jsonify({'error': f'Validazione fallita: {str(ve)}'}), 404
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to delete door: {str(e)}'}), 500
-
+        return jsonify({'status': 'error', 'message': f'Errore durante l\'eliminazione: {str(e)}'}), 500
+        
 
 # ----------------- DEVICE AUTHENTICATION (LOGIN) -------------------
 @dr_api.route('/rooms/auth', methods=['POST'])
@@ -562,8 +505,84 @@ def receive_telemetry():
             # Physically save the file
             file.save(filepath)
             
-            # OPTIONAL: Here you could query the DB to update the Digital Replica 
-            # of the room inserting the path of the last taken photo.
+            # --- INTEGRAZIONE YOLO E AGGIORNAMENTO DATABASE ---
+            try:
+                print(f"\n[DEBUG] 1. Inizio analisi telemetria per la casa ID: {home_id}")
+                
+                pet_detector = current_app.config.get('PET_DETECTOR')
+                if not pet_detector:
+                    print("[DEBUG] ERRORE: PET_DETECTOR non è stato inizializzato in app.py!")
+                
+                db_service = current_app.config['DB_SERVICE']
+                dt_factory = current_app.config['DT_FACTORY']
+                
+                # Cerco la casa nel DB
+                dt = dt_factory.get_dt(home_id)
+                if not dt:
+                    print(f"[DEBUG] ERRORE: La casa con ID '{home_id}' non esiste nel database!")
+                else:
+                    print(f"[DEBUG] 2. Casa trovata: '{dt.get('name')}'. Cerco i Pet associati...")
+                    
+                    pet_trovato = False
+                    for replica in dt.get("digital_replicas", []):
+                        if replica.get("type") == "pet":
+                            pet_trovato = True
+                            pet_id = replica["id"]
+                            print(f"[DEBUG] 3. Trovata replica Pet con ID: {pet_id}")
+                            
+                            pet_data = db_service.get_dr("pet", pet_id)
+                            
+                            if pet_data:
+                                target = pet_data.get("profile", {}).get("species", "dog")
+                                print(f"[DEBUG] 4. Avvio l'inferenza YOLO per cercare un '{target}'...")
+                                
+                                # Esecuzione modello IA
+                                is_found = pet_detector.detect_target(filepath, target)
+                                
+                                if is_found:
+                                    # Aggiornamento posizione del pet
+                                    update_pet_payload = {
+                                        "data.current_room": room_name 
+                                    }
+                                    db_service.update_dr("pet", pet_id, update_pet_payload)
+                                    
+                                    # Aggiornamento status della room a 'occupied'
+                                    for r_replica in dt.get("digital_replicas", []):
+                                        if r_replica.get("type") == "room":
+                                            r_id = r_replica["id"]
+                                            r_data = db_service.get_dr("room", r_id)
+                                            if r_data and r_data.get("profile", {}).get("name") == room_name:
+                                                update_room_payload = {
+                                                    "data.status": "occupied"
+                                                }
+                                                db_service.update_dr("room", r_id, update_room_payload)
+                                                break
+
+                                    print(f"[TELEMETRIA] POSITIVO: {target} identificato! Posizione aggiornata a '{room_name}' e stanza 'occupied'.")
+                                else:
+                                    print(f"[TELEMETRIA] NEGATIVO: Nessun {target} rilevato nella foto.")
+                                    
+                                    # Aggiornamento status della room a 'empty' (se il pet non è rilevato)
+                                    for r_replica in dt.get("digital_replicas", []):
+                                        if r_replica.get("type") == "room":
+                                            r_id = r_replica["id"]
+                                            r_data = db_service.get_dr("room", r_id)
+                                            if r_data and r_data.get("profile", {}).get("name") == room_name:
+                                                update_room_payload = {
+                                                    "data.status": "empty"
+                                                }
+                                                db_service.update_dr("room", r_id, update_room_payload)
+                                                break
+                            else:
+                                print(f"[DEBUG] ERRORE: Il Pet ID {pet_id} non esiste nel database!")
+                    
+                    if not pet_trovato:
+                        print("[DEBUG] NESSUN PET TROVATO! Registra prima un 'pet' per questa casa.")
+                                    
+            except Exception as ai_error:
+                print(f"[YOLO ERROR] Eccezione bloccante durante l'elaborazione: {str(ai_error)}")
+            print("--------------------------------------------------\n")
+            # --------------------------------------------------
 
             return jsonify({
                 'status': 'success',
@@ -576,7 +595,7 @@ def receive_telemetry():
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Error saving telemetry: {str(e)}'}), 500
-
+    
 
 # ==============================================================================
 #                            AUTHENTICATION APIs (user_api)

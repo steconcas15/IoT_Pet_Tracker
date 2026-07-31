@@ -24,7 +24,7 @@ if __name__ == "__main__":
     print("\n--- AVVIO TEST CON STRUTTURA DEL PROGETTO (YOLO11l) ---\n")
 
     # Test case 1: Check for a dog
-    is_dog_here1 = check_animal_presence("C:/Users/marco/Desktop/IoT/IoT_Pet_Tracker/vision_model/dog3.png", "dog")
+    is_dog_here1 = check_animal_presence("C:/Users/marco/Desktop/IoT/IoT_Pet_Tracker/vision_model/salotto.jpg", "dog")
 
     # Test case 2: Check for a cat
     is_cat_here1 = check_animal_presence("C:/Users/marco/Desktop/IoT/IoT_Pet_Tracker/vision_model/cat.jpg", "cat")
