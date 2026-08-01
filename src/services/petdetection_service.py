@@ -1,5 +1,6 @@
 from src.services.base import BaseService
 from bson import ObjectId
+import os
 
 class PetDetectionService(BaseService):
     """
@@ -47,6 +48,14 @@ class PetDetectionService(BaseService):
         # Esecuzione modello IA
         print(f"[PetDetectionService] Avvio inferenza YOLO su immagine: {image_path} per cercare: '{target}'")
         is_found = pet_detector.detect_target(image_path, target)
+
+        # --- NUOVA SEZIONE: RIMOZIONE IMMAGINE ---
+        try:
+            if os.path.exists(image_path):
+                os.remove(image_path)
+                print(f"[PetDetectionService] DEBUG: Immagine {image_path} eliminata dal disco con successo.")
+        except Exception as e:
+            print(f"[PetDetectionService] ATTENZIONE: Impossibile eliminare l'immagine {image_path}: {e}")
         
         if not is_found:
             print(f"[PetDetectionService] NEGATIVO: Nessun {target} rilevato. Nessun aggiornamento.")
