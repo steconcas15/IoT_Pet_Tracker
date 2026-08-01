@@ -49,7 +49,8 @@ schemas:
             dog_entries_count: int
 
     initialization:
-      status: "empty"
-      occupancy_stats: []
+      data:
+        status: "empty"
+        occupancy_stats: []
       profile:
         permission_level: "allowed" # <-- Inizializzazione adattata al profilo

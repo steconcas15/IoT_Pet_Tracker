@@ -49,7 +49,8 @@ schemas:
             manual_duration_seconds: int
 
     initialization:
-      buzzer: ""
-      current_room: ""
-      buzzer_status: "off"
-      daily_buzzer_stats: []
+      data:
+        buzzer: ""
+        current_room: ""
+        buzzer_status: "off"
+        daily_buzzer_stats: []

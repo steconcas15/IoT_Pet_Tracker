@@ -66,8 +66,10 @@ def create_digital_twin():
         # 1. Create the Digital Twin via the Factory
         dt_id = current_app.config['DT_FACTORY'].create_dt(
             name=data['name'],
-            description=data['description']
+            description=data['description'],
         )
+
+        current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='PetDetectionService')
 
         # 2. Update the user profile by adding the home to owned_homes
         doc = current_app.config['DB_SERVICE'].get_dr(dr_type='user', dr_id=current_user_id)
@@ -498,88 +500,36 @@ def receive_telemetry():
             # Physically save the file
             file.save(filepath)
             
-            # --- INTEGRAZIONE YOLO E AGGIORNAMENTO DATABASE ---
+            # --- NUOVA INTEGRAZIONE YOLO TRAMITE DIGITAL TWIN SERVICE ---
             try:
-                print(f"\n[DEBUG] 1. Inizio analisi telemetria per la casa ID: {home_id}")
-                
-                pet_detector = current_app.config.get('PET_DETECTOR')
-                if not pet_detector:
-                    print("[DEBUG] ERRORE: PET_DETECTOR non è stato inizializzato in app.py!")
-                
-                db_service = current_app.config['DB_SERVICE']
                 dt_factory = current_app.config['DT_FACTORY']
+                db_service = current_app.config['DB_SERVICE']
+                pet_detector = current_app.config.get('PET_DETECTOR')
                 
-                # Cerco la casa nel DB
-                dt = dt_factory.get_dt(home_id)
-                if not dt:
-                    print(f"[DEBUG] ERRORE: La casa con ID '{home_id}' non esiste nel database!")
+                # Recupera l'istanza del Digital Twin completamente inizializzata (DR + Servizi)
+                dt_instance = dt_factory.get_dt_instance(home_id)
+                
+                if not dt_instance:
+                    print(f"[TELEMETRY] ERRORE: La casa con ID '{home_id}' non esiste nel database!")
                 else:
-                    print(f"[DEBUG] 2. Casa trovata: '{dt.get('name')}'. Cerco i Pet associati...")
-                    
-                    pet_trovato = False
-                    for replica in dt.get("digital_replicas", []):
-                        if replica.get("type") == "pet":
-                            pet_trovato = True
-                            pet_id = replica["id"]
-                            print(f"[DEBUG] 3. Trovata replica Pet con ID: {pet_id}")
-                            
-                            pet_data = db_service.get_dr("pet", pet_id)
-                            
-                            if pet_data:
-                                target = pet_data.get("profile", {}).get("species", "dog")
-                                print(f"[DEBUG] 4. Avvio l'inferenza YOLO per cercare un '{target}'...")
-                                
-                                # Esecuzione modello IA
-                                is_found = pet_detector.detect_target(filepath, target)
-                                
-                                if is_found:
-                                    # Aggiornamento posizione del pet
-                                    update_pet_payload = {
-                                        "data.current_room": room_name 
-                                    }
-                                    db_service.update_dr("pet", pet_id, update_pet_payload)
+                    # Chiediamo al Digital Twin di eseguire il servizio di rilevamento
+                    dt_instance.execute_service(
+                        service_name="PetDetectionService",
+                        image_path=filepath,
+                        room_name=room_name,
+                        db_service=db_service,
+                        pet_detector=pet_detector
+                    )
                                     
-                                    # Aggiornamento status della room a 'occupied'
-                                    for r_replica in dt.get("digital_replicas", []):
-                                        if r_replica.get("type") == "room":
-                                            r_id = r_replica["id"]
-                                            r_data = db_service.get_dr("room", r_id)
-                                            if r_data and r_data.get("profile", {}).get("name") == room_name:
-                                                update_room_payload = {
-                                                    "data.status": "occupied"
-                                                }
-                                                db_service.update_dr("room", r_id, update_room_payload)
-                                                break
-
-                                    print(f"[TELEMETRIA] POSITIVO: {target} identificato! Posizione aggiornata a '{room_name}' e stanza 'occupied'.")
-                                else:
-                                    print(f"[TELEMETRIA] NEGATIVO: Nessun {target} rilevato nella foto.")
-                                    
-                                    # Aggiornamento status della room a 'empty' (se il pet non è rilevato)
-                                    for r_replica in dt.get("digital_replicas", []):
-                                        if r_replica.get("type") == "room":
-                                            r_id = r_replica["id"]
-                                            r_data = db_service.get_dr("room", r_id)
-                                            if r_data and r_data.get("profile", {}).get("name") == room_name:
-                                                update_room_payload = {
-                                                    "data.status": "empty"
-                                                }
-                                                db_service.update_dr("room", r_id, update_room_payload)
-                                                break
-                            else:
-                                print(f"[DEBUG] ERRORE: Il Pet ID {pet_id} non esiste nel database!")
-                    
-                    if not pet_trovato:
-                        print("[DEBUG] NESSUN PET TROVATO! Registra prima un 'pet' per questa casa.")
-                                    
-            except Exception as ai_error:
-                print(f"[YOLO ERROR] Eccezione bloccante durante l'elaborazione: {str(ai_error)}")
-            print("--------------------------------------------------\n")
+            except ValueError as ve:
+                print(f"[TELEMETRY] Servizio non eseguito: {str(ve)}")
+            except Exception as service_error:
+                print(f"[TELEMETRY ERROR] Eccezione durante l'esecuzione del servizio: {str(service_error)}")
             # --------------------------------------------------
 
             return jsonify({
                 'status': 'success',
-                'message': 'Photo received and saved successfully',
+                'message': 'Photo received and processed successfully',
                 'data': {
                     'room_name': room_name,
                     'saved_path': filepath
@@ -588,7 +538,7 @@ def receive_telemetry():
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Error saving telemetry: {str(e)}'}), 500
-    
+        
 
 # ==============================================================================
 #                            AUTHENTICATION APIs (user_api)

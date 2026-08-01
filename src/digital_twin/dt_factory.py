@@ -168,7 +168,7 @@ class DTFactory:
         # Return the registry mapping of available services in the system
         return {
             "AggregationService": "src.services.analytics",
-            "TemperaturePredictionService": "src.services.TemperaturePredictionService",
+            "PetDetectionService": "src.services.petdetection_service",
         }
 
     # ==============================================================================
