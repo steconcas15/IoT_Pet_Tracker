@@ -1,3 +1,5 @@
+import os
+
 import cv2
 from ultralytics import YOLO
 
@@ -10,12 +12,15 @@ class PetDetector:
         Using the YOLO11l model for a great balance between 
         high precision and manageable file size.
         """
-        # Passiamo al modello Large. 
-        # Ultralytics lo scaricherà in automatico se non lo trova.
-        self.model_name = "yolo11l.pt"
+        # 1. Trova il percorso assoluto della cartella in cui si trova QUESTO file (model.py)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 2. Unisci il percorso della cartella al nome del file del modello
+        model_path = os.path.join(current_dir, "yolov11_model", "yolo11l.pt")
 
-        print(f"[YOLO] Loading Large model: {self.model_name}...")
-        self.model = YOLO(self.model_name)
+        # 3. Passa il percorso assoluto a YOLO
+        print(f"[YOLO] Caricamento modello da: {model_path}")
+        self.model = YOLO(model_path)
 
         # Text mapping for standard COCO dataset classes (English only)
         self.class_mapping = {
