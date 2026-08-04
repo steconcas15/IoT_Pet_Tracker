@@ -14,6 +14,7 @@ from flask_jwt_extended import JWTManager
 # ==============================================================================
 
 # Tracks and validates data structures/blueprints for our digital replicas
+from src.services.room_statistics_service import RoomStatisticsService
 from src.virtualization.digital_replica.schema_registry import SchemaRegistry
 
 # The heavy lifter for database interactions (queries, connections, etc.).

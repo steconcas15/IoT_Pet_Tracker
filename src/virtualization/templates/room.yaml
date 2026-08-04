@@ -15,6 +15,7 @@ schemas:
       status: str
       camera_status: str
       occupancy_stats: List[Dict]
+      last_entry_time: datetime
 
   validations:
     mandatory_fields:
@@ -51,11 +52,14 @@ schemas:
             date: datetime
             daily_stay_duration_mins: float
             dog_entries_count: int
+      last_entry_time:
+        type: datetime
 
     initialization:
       data:
         status: "empty"
         occupancy_stats: []
         camera_status: "UNKNOWN"
+        last_entry_time: null
       profile:
-        permission_level: "allowed" # <-- Inizializzazione adattata al profilo
+        permission_level: "allowed"

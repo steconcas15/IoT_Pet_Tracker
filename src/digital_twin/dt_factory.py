@@ -169,6 +169,7 @@ class DTFactory:
         return {
             "AggregationService": "src.services.analytics",
             "PetDetectionService": "src.services.petdetection_service",
+            "RoomStatisticsService": "src.services.room_statistics_service",
         }
 
     # ==============================================================================

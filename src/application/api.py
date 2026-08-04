@@ -12,7 +12,7 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # Import datetime for handling timestamps
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Import ObjectId for handling MongoDB document identifiers
 from bson import ObjectId
@@ -70,6 +70,8 @@ def create_digital_twin():
         )
 
         current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='PetDetectionService')
+        current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='RoomStatisticsService')
+
 
         # 2. Update the user profile by adding the home to owned_homes
         doc = current_app.config['DB_SERVICE'].get_dr(dr_type='user', dr_id=current_user_id)
@@ -653,6 +655,95 @@ def logout():
     }), 200
 
 
+
+# ==============================================================================
+#                        API STATISTICS
+# ==============================================================================
+@dt_api.route('/<dt_id>/statistics', methods=['GET'])
+@jwt_required()
+def get_home_statistics(dt_id):
+    """
+    Recupera le statistiche aggiornate in tempo reale di tutte le stanze 
+    associate a un determinato Home Environment.
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        db_service = current_app.config['DB_SERVICE']
+        dt_factory = current_app.config['DT_FACTORY']
+
+        # 1. Sicurezza: Verifica che l'utente abbia accesso a questa casa
+        user = db_service.get_user_by_id(current_user_id)
+        if not user:
+            return jsonify({'error': 'Utente non trovato'}), 404
+
+        owned_homes = user.get('data', {}).get('owned_homes', [])
+        viewable_homes = user.get('data', {}).get('viewable_homes', [])
+
+        if dt_id not in owned_homes and dt_id not in viewable_homes:
+            return jsonify({'error': 'Accesso negato. Non sei admin né viewer di questa casa.'}), 403
+
+        # 2. Recupero dei dati del Digital Twin
+        dt_data = dt_factory.get_dt(dt_id)
+        if not dt_data:
+            return jsonify({'error': 'Home Environment non trovato'}), 404
+
+        room_stats = []
+
+        # 3. Scansione delle Digital Replicas per trovare le stanze
+        for replica in dt_data.get("digital_replicas", []):
+            if replica.get("type") == "room":
+                room_dr = db_service.get_dr("room", replica.get("id"))
+                if not room_dr:
+                    continue
+                    
+                room_name = room_dr.get("profile", {}).get("name", "Unknown")
+                room_data = room_dr.get("data", {})
+                
+                status = room_data.get("status", "empty")
+                last_entry_time = room_data.get("last_entry_time")
+                occupancy_stats = room_data.get("occupancy_stats", [])
+                
+                # Prendiamo i dati storicizzati nel DB (se la lista è vuota, inizializziamo a zero)
+                today_stats = occupancy_stats[0] if occupancy_stats else {
+                    "daily_stay_duration_mins": 0.0,
+                    "dog_entries_count": 0
+                }
+                
+                # --- CALCOLO IN TEMPO REALE ---
+                # Se il pet è attualmente nella stanza, calcoliamo da quanti minuti è entrato
+                current_session_mins = 0.0
+                if status == "occupied" and last_entry_time:
+                    if isinstance(last_entry_time, str):
+                        last_entry_time = datetime.fromisoformat(last_entry_time.replace("Z", "+00:00"))
+                    elif isinstance(last_entry_time, datetime) and last_entry_time.tzinfo is None:
+                        last_entry_time = last_entry_time.replace(tzinfo=timezone.utc)
+                        
+                    time_diff = datetime.now(timezone.utc) - last_entry_time
+                    current_session_mins = time_diff.total_seconds() / 60.0
+                
+                # Il tempo totale è il tempo storicizzato + il tempo dell'eventuale sessione in corso
+                total_duration = today_stats.get("daily_stay_duration_mins", 0.0) + current_session_mins
+                
+                room_stats.append({
+                    "room_id": replica.get("id"),
+                    "room_name": room_name,
+                    "status": status,
+                    "daily_stay_duration_mins": round(total_duration, 2), # Arrotondato a 2 decimali
+                    "dog_entries_count": today_stats.get("dog_entries_count", 0),
+                    "is_occupied_now": status == "occupied"
+                })
+
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'home_id': dt_id,
+                'rooms': room_stats
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Errore nel recupero statistiche: {str(e)}'}), 500
+    
 # ==============================================================================
 #                       BLUEPRINTS REGISTRATION UTILITY
 # ==============================================================================

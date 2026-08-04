@@ -1,12 +1,15 @@
 from src.services.base import BaseService
+# Importiamo il servizio delle statistiche per invocarlo al bisogno
+from src.services.room_statistics_service import RoomStatisticsService
 from bson import ObjectId
 import os
 from flask import current_app
+from datetime import datetime, timezone
 
 class PetDetectionService(BaseService):
     """
     Servizio per il rilevamento del pet tramite YOLO e l'aggiornamento
-    dello stato del Digital Twin.
+    dello stato del Digital Twin e delle statistiche di permanenza.
     """
 
     def __init__(self):
@@ -33,14 +36,12 @@ class PetDetectionService(BaseService):
             return False
 
         raw_pet_id = pet_ref.get("_id")
-        
         pet_id = ObjectId(raw_pet_id) if ObjectId.is_valid(raw_pet_id) else raw_pet_id
         
         pet_db_data = db_service.get_dr("pet", pet_id)
         if not pet_db_data:
             return False
 
-        # Rimosso il recupero del "target" specifico (es. dog/cat)
         previous_room = pet_db_data.get("data", {}).get("current_room", "")
         
         # Esecuzione modello IA generica
@@ -60,6 +61,13 @@ class PetDetectionService(BaseService):
         # =====================================================================
         if not is_found:
             print("[PetDetectionService] NEGATIVO: Nessun pet rilevato.")
+            
+            # Non facciamo assolutamente nulla.
+            # La stanza mantiene lo status "occupied", il timer continua a girare,
+            # e il pet mantiene la sua ultima posizione nota.
+            # L'uscita (e il calcolo delle statistiche) avverrà solo nella LOGICA 2,
+            # quando il pet verrà rilevato positivamente in una NUOVA stanza.
+                
             return False
 
         # =====================================================================
@@ -67,68 +75,106 @@ class PetDetectionService(BaseService):
         # =====================================================================
         print(f"[PetDetectionService] POSITIVO: Pet identificato in '{room_name}'!")
         
-        pet_metadata = pet_db_data.get("metadata", {})
-
-        # STEP 1: Svuota la stanza precedente
-        if previous_room and previous_room != room_name:
-            old_rooms = db_service.query_drs("room", {"profile.name": previous_room})
-            if old_rooms:
-                old_room_data = old_rooms[0]
-                old_room_id = old_room_data["_id"]
-                old_room_metadata = old_room_data.get("metadata", {})
-                try:
-                    db_service.update_dr(
-                        "room", 
-                        old_room_id, 
-                        {"data.status": "empty", "metadata": old_room_metadata}
-                    )
-                    print(f"  -> DB Stanza: '{previous_room}' liberata (status: empty).")
-                except Exception as e:
-                    print(f"  -> ERRORE DB Stanza '{previous_room}': {e}")
-        
-        # STEP 2: Aggiorna la posizione del pet sulla sua DR
-        try:
-            db_service.update_dr(
-                "pet", 
-                pet_id, 
-                {"data.current_room": room_name, "metadata": pet_metadata}
-            )
-            print(f"  -> DB Pet: 'current_room' aggiornata a '{room_name}'.")
-        except Exception as e:
-            print(f"  -> ERRORE DB Pet: Impossibile aggiornare la posizione: {e}")
+        # Se il pet è in una NUOVA stanza rispetto a prima
+        if previous_room != room_name:
             
-        # STEP 3: Occupa la nuova stanza e GESTIONE ALLARME
-        new_rooms = db_service.query_drs("room", {"profile.name": room_name})
-        if new_rooms:
-            new_room_data = new_rooms[0]
-            new_room_id = new_room_data["_id"]
-            new_room_metadata = new_room_data.get("metadata", {})
-            
-            permission_level = new_room_data.get("profile", {}).get("permission_level", "allowed")
-            
-            try:
-                db_service.update_dr(
-                    "room", 
-                    new_room_id, 
-                    {"data.status": "occupied", "metadata": new_room_metadata}
-                )
-                print(f"  -> DB Stanza: '{room_name}' occupata (status: occupied).")
-            except Exception as e:
-                print(f"  -> ERRORE DB Stanza '{room_name}': {e}")
+            # STEP 1: Fai uscire il pet dalla vecchia stanza (calcolando le statistiche)
+            if previous_room:
+                self._handle_pet_exit(previous_room, db_service)
                 
-            # INVIO COMANDI MQTT
-            if hasattr(current_app, 'mqtt_manager'):
-                try:
-                    mqtt_client = current_app.mqtt_manager.client
-                    if permission_level == "forbidden":
-                        print(f"  -> 🚨 ALLARME: Il pet è in una stanza vietata ({room_name})! Attivazione buzzer.")
-                        mqtt_client.publish("casa/sound", "ON")
-                    elif permission_level == "allowed":
-                        print(f"  -> ✅ Stanza sicura ({room_name}). Disattivazione buzzer.")
-                        mqtt_client.publish("casa/sound", "OFF")
-                except Exception as e:
-                    print(f"  -> [MQTT] Errore durante l'invio del comando al buzzer: {e}")
-        else:
-            print(f"  -> ATTENZIONE: La stanza '{room_name}' non esiste nel database.")
+            # STEP 2: Fai entrare il pet nella nuova stanza (avviando il timer)
+            self._handle_pet_entry(room_name, db_service)
+            
+            # STEP 3: Aggiorna la posizione attuale sulla DR del pet
+            db_service.update_dr("pet", pet_id, {"data.current_room": room_name})
+            print(f"  -> DB Pet: 'current_room' aggiornata a '{room_name}'.")
+            
+            # STEP 4: Gestione MQTT / Allarmi
+            self._trigger_alarms(room_name, db_service)
             
         return True
+
+    # -------------------------------------------------------------------------
+    # METODI DI APPOGGIO (HELPER)
+    # -------------------------------------------------------------------------
+
+    def _handle_pet_exit(self, room_name: str, db_service):
+            """Gestisce l'uscita da una stanza: calcola il tempo e aggiorna le statistiche."""
+            rooms = db_service.query_drs("room", {"profile.name": room_name})
+            if not rooms:
+                return
+                
+            room_data = rooms[0]
+            room_id = room_data["_id"]
+            current_status = room_data.get("data", {}).get("status", "empty")
+
+            if current_status == "occupied":
+                last_entry_time = room_data.get("data", {}).get("last_entry_time")
+                duration_minutes = 0.0
+
+                # Calcolo dei minuti passati dall'ingresso
+                if last_entry_time:
+                    # 1. Se arriva come stringa, la parsiamo assegnando il fuso orario
+                    if isinstance(last_entry_time, str):
+                        last_entry_time = datetime.fromisoformat(last_entry_time.replace("Z", "+00:00"))
+                    # 2. FIX: Se arriva come datetime da MongoDB (naive), forziamo il fuso orario UTC
+                    elif isinstance(last_entry_time, datetime) and last_entry_time.tzinfo is None:
+                        last_entry_time = last_entry_time.replace(tzinfo=timezone.utc)
+
+                    # Ora entrambe le date sono "offset-aware" e la sottrazione funzionerà
+                    time_diff = datetime.now(timezone.utc) - last_entry_time
+                    duration_minutes = time_diff.total_seconds() / 60.0
+
+                # 1. Invochiamo il servizio statistiche per sommare la permanenza
+                stats_service = RoomStatisticsService()
+                stats_service.execute({
+                    "db_service": db_service,
+                    "room_id": str(room_id),
+                    "duration_minutes": duration_minutes,
+                    "entries_to_add": 1
+                })
+
+                # 2. Resettiamo lo stato della stanza e puliamo il timer
+                db_service.update_dr("room", str(room_id), {
+                    "data.status": "empty",
+                    "data.last_entry_time": None
+                })
+                print(f"  -> DB Stanza: '{room_name}' liberata. Statistiche aggiornate ({duration_minutes:.2f} min).")
+
+
+    def _handle_pet_entry(self, room_name: str, db_service):
+        """Gestisce l'ingresso in una stanza: imposta occupato e avvia il timer."""
+        rooms = db_service.query_drs("room", {"profile.name": room_name})
+        if not rooms:
+            print(f"  -> ATTENZIONE: La stanza '{room_name}' non esiste nel database.")
+            return
+            
+        room_data = rooms[0]
+        room_id = room_data["_id"]
+
+        db_service.update_dr("room", str(room_id), {
+            "data.status": "occupied",
+            "data.last_entry_time": datetime.now(timezone.utc)
+        })
+        print(f"  -> DB Stanza: '{room_name}' occupata. Timer avviato.")
+
+
+    def _trigger_alarms(self, room_name: str, db_service):
+        """Controlla i permessi della stanza e invia gli eventuali allarmi MQTT."""
+        rooms = db_service.query_drs("room", {"profile.name": room_name})
+        if not rooms:
+            return
+            
+        permission_level = rooms[0].get("profile", {}).get("permission_level", "allowed")
+        
+        if hasattr(current_app, 'mqtt_manager'):
+            try:
+                mqtt_client = current_app.mqtt_manager.client
+                if permission_level == "forbidden":
+                    print(f"  -> 🚨 ALLARME: Il pet è in una stanza vietata ({room_name})! Attivazione buzzer.")
+                    mqtt_client.publish("casa/sound", "ON")
+                elif permission_level == "allowed":
+                    print(f"  -> ✅ Stanza sicura ({room_name}). Disattivazione buzzer.")
+                    mqtt_client.publish("casa/sound", "OFF")
+            except Exception as e:
+                print(f"  -> [MQTT] Errore durante l'invio del comando: {e}")
