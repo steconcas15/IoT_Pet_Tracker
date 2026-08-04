@@ -13,6 +13,7 @@ schemas:
   entity:
     data:
       status: str
+      camera_status: str
       occupancy_stats: List[Dict]
 
   validations:
@@ -39,6 +40,9 @@ schemas:
       status:
         type: str
         enum: ["empty", "occupied"]
+      camera_status:
+        type: str
+        enum: ["ONLINE", "OFFLINE", "UNKNOWN"]
       occupancy_stats:
         type: List[Dict]
         item_constraints:
@@ -52,5 +56,6 @@ schemas:
       data:
         status: "empty"
         occupancy_stats: []
+        camera_status: "UNKNOWN"
       profile:
         permission_level: "allowed" # <-- Inizializzazione adattata al profilo

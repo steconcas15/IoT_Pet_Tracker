@@ -109,7 +109,9 @@ class FlaskServer:
 
     def _init_mqtt(self):
         """Inizializza il gestore MQTT delegando la logica al servizio esterno"""
-        self.mqtt_manager = MQTTManager(self.app) #[cite: 2]
+        self.mqtt_manager = MQTTManager(self.app)
+
+        self.app.mqtt_manager = self.mqtt_manager
         
         # 1. Carica la configurazione dal file separato
         mqtt_config = ConfigLoader.load_mqtt_config()

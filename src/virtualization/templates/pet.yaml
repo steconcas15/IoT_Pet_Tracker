@@ -30,7 +30,7 @@ schemas:
     type_constraints:
       buzzer_status:
         type: str
-        enum: ["off", "on"]
+        enum: ["ONLINE", "OFFLINE", "UNKNOWN"]
       daily_buzzer_stats:
         type: List[Dict]
         item_constraints:
@@ -52,5 +52,5 @@ schemas:
       data:
         buzzer: ""
         current_room: ""
-        buzzer_status: "off"
+        buzzer_status: "UNKNOWN"
         daily_buzzer_stats: []

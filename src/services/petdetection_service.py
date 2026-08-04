@@ -1,6 +1,7 @@
 from src.services.base import BaseService
 from bson import ObjectId
 import os
+from flask import current_app
 
 class PetDetectionService(BaseService):
     """
@@ -24,7 +25,6 @@ class PetDetectionService(BaseService):
         if not all([image_path, room_name, db_service, pet_detector]):
             raise ValueError("Parametri mancanti per PetDetectionService.")
 
-        # CORREZIONE 1: Estrarre usando la chiave 'id' (come salvato in API) e non '_id'
         replicas = data.get("digital_replicas", [])
         pet_ref = next((r for r in replicas if r.get("type") == "pet"), None)
         
@@ -34,22 +34,20 @@ class PetDetectionService(BaseService):
 
         raw_pet_id = pet_ref.get("_id")
         
-        # CORREZIONE 2: Cast dell'ID stringa a ObjectId per permettere a MongoDB di trovarlo
         pet_id = ObjectId(raw_pet_id) if ObjectId.is_valid(raw_pet_id) else raw_pet_id
         
-        # Recupero i dati aggiornati
         pet_db_data = db_service.get_dr("pet", pet_id)
         if not pet_db_data:
             return False
 
-        target = pet_db_data.get("profile", {}).get("species", "dog")
+        # Rimosso il recupero del "target" specifico (es. dog/cat)
         previous_room = pet_db_data.get("data", {}).get("current_room", "")
         
-        # Esecuzione modello IA
-        print(f"[PetDetectionService] Avvio inferenza YOLO su immagine: {image_path} per cercare: '{target}'")
-        is_found = pet_detector.detect_target(image_path, target)
+        # Esecuzione modello IA generica
+        print(f"[PetDetectionService] Avvio inferenza YOLO su immagine: {image_path} per cercare un pet generico")
+        is_found = pet_detector.detect_any_pet(image_path)
 
-        # --- NUOVA SEZIONE: RIMOZIONE IMMAGINE ---
+        # --- RIMOZIONE IMMAGINE ---
         try:
             if os.path.exists(image_path):
                 os.remove(image_path)
@@ -57,15 +55,18 @@ class PetDetectionService(BaseService):
         except Exception as e:
             print(f"[PetDetectionService] ATTENZIONE: Impossibile eliminare l'immagine {image_path}: {e}")
         
+        # =====================================================================
+        # LOGICA 1: NESSUN RILEVAMENTO
+        # =====================================================================
         if not is_found:
-            print(f"[PetDetectionService] NEGATIVO: Nessun {target} rilevato. Nessun aggiornamento.")
+            print("[PetDetectionService] NEGATIVO: Nessun pet rilevato.")
             return False
 
-        # --- SE IL RILEVAMENTO È POSITIVO ---
-        print(f"[PetDetectionService] POSITIVO: {target} identificato in '{room_name}'!")
+        # =====================================================================
+        # LOGICA 2: PET RILEVATO
+        # =====================================================================
+        print(f"[PetDetectionService] POSITIVO: Pet identificato in '{room_name}'!")
         
-        # CORREZIONE 3 (Workaround Metadati): Prepariamo i metadati correnti del pet 
-        # per evitare che il database_service li sovrascriva cancellando 'created_at'.
         pet_metadata = pet_db_data.get("metadata", {})
 
         # STEP 1: Svuota la stanza precedente
@@ -96,12 +97,15 @@ class PetDetectionService(BaseService):
         except Exception as e:
             print(f"  -> ERRORE DB Pet: Impossibile aggiornare la posizione: {e}")
             
-        # STEP 3: Occupa la nuova stanza
+        # STEP 3: Occupa la nuova stanza e GESTIONE ALLARME
         new_rooms = db_service.query_drs("room", {"profile.name": room_name})
         if new_rooms:
             new_room_data = new_rooms[0]
             new_room_id = new_room_data["_id"]
             new_room_metadata = new_room_data.get("metadata", {})
+            
+            permission_level = new_room_data.get("profile", {}).get("permission_level", "allowed")
+            
             try:
                 db_service.update_dr(
                     "room", 
@@ -111,6 +115,19 @@ class PetDetectionService(BaseService):
                 print(f"  -> DB Stanza: '{room_name}' occupata (status: occupied).")
             except Exception as e:
                 print(f"  -> ERRORE DB Stanza '{room_name}': {e}")
+                
+            # INVIO COMANDI MQTT
+            if hasattr(current_app, 'mqtt_manager'):
+                try:
+                    mqtt_client = current_app.mqtt_manager.client
+                    if permission_level == "forbidden":
+                        print(f"  -> 🚨 ALLARME: Il pet è in una stanza vietata ({room_name})! Attivazione buzzer.")
+                        mqtt_client.publish("casa/sound", "ON")
+                    elif permission_level == "allowed":
+                        print(f"  -> ✅ Stanza sicura ({room_name}). Disattivazione buzzer.")
+                        mqtt_client.publish("casa/sound", "OFF")
+                except Exception as e:
+                    print(f"  -> [MQTT] Errore durante l'invio del comando al buzzer: {e}")
         else:
             print(f"  -> ATTENZIONE: La stanza '{room_name}' non esiste nel database.")
             
