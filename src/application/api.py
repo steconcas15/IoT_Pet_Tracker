@@ -71,6 +71,7 @@ def create_digital_twin():
 
         current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='PetDetectionService')
         current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='RoomStatisticsService')
+        current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='PetStatisticsService')
 
 
         # 2. Update the user profile by adding the home to owned_homes
@@ -743,6 +744,104 @@ def get_home_statistics(dt_id):
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Errore nel recupero statistiche: {str(e)}'}), 500
+    
+
+
+@dt_api.route('/<dt_id>/pet-statistics', methods=['GET'])
+@jwt_required()
+def get_pet_statistics(dt_id):
+    """
+    Recupera le statistiche aggiornate in tempo reale del pet (violazioni e buzzer)
+    associato a un determinato Home Environment.
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        db_service = current_app.config['DB_SERVICE']
+        dt_factory = current_app.config['DT_FACTORY']
+
+        # 1. Sicurezza: Verifica permessi sulla casa
+        user = db_service.get_user_by_id(current_user_id)
+        if not user:
+            return jsonify({'error': 'Utente non trovato'}), 404
+
+        owned_homes = user.get('data', {}).get('owned_homes', [])
+        viewable_homes = user.get('data', {}).get('viewable_homes', [])
+
+        if dt_id not in owned_homes and dt_id not in viewable_homes:
+            return jsonify({'error': 'Accesso negato. Non sei admin né viewer di questa casa.'}), 403
+
+        # 2. Recupero Digital Twin
+        dt_data = dt_factory.get_dt(dt_id)
+        if not dt_data:
+            return jsonify({'error': 'Home Environment non trovato'}), 404
+
+        pet_stats = None
+
+        # 3. Ricerca del Pet all'interno della casa
+        for replica in dt_data.get("digital_replicas", []):
+            if replica.get("type") == "pet":
+                pet_dr = db_service.get_dr("pet", replica.get("id"))
+                if not pet_dr:
+                    continue
+                    
+                pet_name = pet_dr.get("profile", {}).get("name", "Unknown")
+                pet_data = pet_dr.get("data", {})
+                
+                last_buzzer_start = pet_data.get("last_buzzer_start_time")
+                daily_buzzer_stats = pet_data.get("daily_buzzer_stats", [])
+                
+                # Inizializza i dati storici a 0 se l'array è vuoto
+                today_stats = daily_buzzer_stats[0] if daily_buzzer_stats else {
+                    "auto_duration_mins": 0.0,
+                    "auto_violations_count": 0
+                }
+                
+                # --- CALCOLO IN TEMPO REALE ---
+                current_session_mins = 0.0
+                current_violation = 0
+                
+                # Se il buzzer è attualmente attivo, calcoliamo il tempo in corso
+                if last_buzzer_start:
+                    if isinstance(last_buzzer_start, str):
+                        last_buzzer_start = datetime.fromisoformat(last_buzzer_start.replace("Z", "+00:00"))
+                    elif isinstance(last_buzzer_start, datetime) and last_buzzer_start.tzinfo is None:
+                        last_buzzer_start = last_buzzer_start.replace(tzinfo=timezone.utc)
+                        
+                    time_diff = datetime.now(timezone.utc) - last_buzzer_start
+                    current_session_mins = time_diff.total_seconds() / 60.0
+                    
+                    # Contiamo la violazione attuale che non è ancora stata storicizzata
+                    current_violation = 1 
+                
+                # Somma i dati salvati con quelli calcolati dinamicamente
+                total_duration = today_stats.get("auto_duration_mins", 0.0) + current_session_mins
+                total_violations = today_stats.get("auto_violations_count", 0) + current_violation
+                
+                pet_stats = {
+                    "pet_id": replica.get("id"),
+                    "pet_name": pet_name,
+                    "current_room": pet_data.get("current_room", ""),
+                    "auto_duration_mins": round(total_duration, 2),
+                    "auto_violations_count": total_violations,
+                    "is_buzzer_active_now": bool(last_buzzer_start)
+                }
+                
+                # Dato che c'è solo un pet per casa, possiamo interrompere il ciclo
+                break 
+
+        if not pet_stats:
+            return jsonify({'error': 'Nessun pet associato a questa casa.'}), 404
+
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'home_id': dt_id,
+                'pet': pet_stats
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Errore nel recupero statistiche pet: {str(e)}'}), 500
     
 # ==============================================================================
 #                       BLUEPRINTS REGISTRATION UTILITY

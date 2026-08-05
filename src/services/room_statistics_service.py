@@ -50,7 +50,7 @@ class RoomStatisticsService(BaseService):
         # 3. Logica di Reset o Incremento
         if current_daily_stat:
             # Stesso giorno: incrementiamo i contatori
-            current_daily_stat["dog_entries_count"] += entries_to_add
+            current_daily_stat["pet_entries_count"] += entries_to_add
             current_daily_stat["daily_stay_duration_mins"] += duration_minutes
             new_stats_list = [current_daily_stat]
         else:
@@ -58,7 +58,7 @@ class RoomStatisticsService(BaseService):
             new_stats_list = [{
                 "date": today,
                 "daily_stay_duration_mins": duration_minutes,
-                "dog_entries_count": entries_to_add
+                "pet_entries_count": entries_to_add
             }]
 
         # 4. Aggiorniamo il Digital Replica della stanza sovrascrivendo l'array

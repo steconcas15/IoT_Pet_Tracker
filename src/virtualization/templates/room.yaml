@@ -47,7 +47,7 @@ schemas:
       occupancy_stats:
         type: List[Dict]
         item_constraints:
-          required_fields: ["date", "daily_stay_duration_mins", "dog_entries_count"]
+          required_fields: ["date", "daily_stay_duration_mins", "pet_entries_count"]
           type_mappings:
             date: datetime
             daily_stay_duration_mins: float

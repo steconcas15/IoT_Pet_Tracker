@@ -11,46 +11,31 @@ schemas:
       
   entity:
     data:
-      buzzer: str             # Buzzer identifier
-      current_room: str       # ID of the room where the pet currently is
-      buzzer_status: str      # Buzzer status (on/off)
-      daily_buzzer_stats: List[Dict] # Daily summary of buzzer metrics
+      current_room: str
+      buzzer_status: str
+      last_buzzer_start_time: datetime       # <-- NUOVO CAMPO PER IL TIMER
+      daily_buzzer_stats: List[Dict]
 
   validations:
-    mandatory_fields:
-      root:
-        - _id
-        - type
-      profile:
-        - name
-      metadata:
-        - created_at
-        - updated_at
-
     type_constraints:
-      buzzer_status:
-        type: str
-        enum: ["ONLINE", "OFFLINE", "UNKNOWN"]
+      last_buzzer_start_time:                # <-- NUOVO VINCOLO
+        type: datetime
       daily_buzzer_stats:
         type: List[Dict]
         item_constraints:
           required_fields: [
             "date", 
             "auto_violations_count", 
-            "auto_duration_seconds", 
-            "manual_actions_count", 
-            "manual_duration_seconds"
+            "auto_duration_mins"
           ]
           type_mappings:
             date: datetime
             auto_violations_count: int
-            auto_duration_seconds: int
-            manual_actions_count: int
-            manual_duration_seconds: int
-
+            auto_duration_mins: float        # <-- CORRETTO DA "floats" A "float"
+            
     initialization:
       data:
-        buzzer: ""
         current_room: ""
         buzzer_status: "UNKNOWN"
+        last_buzzer_start_time: null         # <-- INIZIALIZZAZIONE VUOTA
         daily_buzzer_stats: []

@@ -90,7 +90,7 @@ class PetDetectionService(BaseService):
             print(f"  -> DB Pet: 'current_room' aggiornata a '{room_name}'.")
             
             # STEP 4: Gestione MQTT / Allarmi
-            self._trigger_alarms(room_name, db_service)
+            self._trigger_alarms(room_name, db_service, str(pet_id))
             
         return True
 
@@ -159,22 +159,60 @@ class PetDetectionService(BaseService):
         print(f"  -> DB Stanza: '{room_name}' occupata. Timer avviato.")
 
 
-    def _trigger_alarms(self, room_name: str, db_service):
+    def _trigger_alarms(self, room_name: str, db_service, pet_id: str):
         """Controlla i permessi della stanza e invia gli eventuali allarmi MQTT."""
         rooms = db_service.query_drs("room", {"profile.name": room_name})
         if not rooms:
             return
             
         permission_level = rooms[0].get("profile", {}).get("permission_level", "allowed")
+        pet_dr = db_service.get_dr("pet", pet_id)
+        last_buzzer_start = pet_dr.get("data", {}).get("last_buzzer_start_time")
         
-        if hasattr(current_app, 'mqtt_manager'):
-            try:
-                mqtt_client = current_app.mqtt_manager.client
-                if permission_level == "forbidden":
+        # Gestione accensione allarme (ON)
+        if permission_level == "forbidden":
+            if not last_buzzer_start:
+                db_service.update_dr("pet", pet_id, {
+                    "data.last_buzzer_start_time": datetime.now(timezone.utc)
+                })
+                
+            if hasattr(current_app, 'mqtt_manager'):
+                try:
+                    current_app.mqtt_manager.client.publish("casa/sound", "ON")
                     print(f"  -> 🚨 ALLARME: Il pet è in una stanza vietata ({room_name})! Attivazione buzzer.")
-                    mqtt_client.publish("casa/sound", "ON")
-                elif permission_level == "allowed":
+                except Exception as e:
+                    print(f"  -> [MQTT] Errore: {e}")
+
+        # Gestione spegnimento allarme (OFF)
+        elif permission_level == "allowed":
+            if last_buzzer_start:
+                duration_minutes = 0.0
+                
+                if isinstance(last_buzzer_start, str):
+                    last_buzzer_start = datetime.fromisoformat(last_buzzer_start.replace("Z", "+00:00"))
+                elif isinstance(last_buzzer_start, datetime) and last_buzzer_start.tzinfo is None:
+                    last_buzzer_start = last_buzzer_start.replace(tzinfo=timezone.utc)
+                    
+                time_diff = datetime.now(timezone.utc) - last_buzzer_start
+                duration_minutes = time_diff.total_seconds() / 60.0
+                
+                # Invochiamo il PetStatisticsService
+                from src.services.pet_statistics_service import PetStatisticsService
+                stats_service = PetStatisticsService()
+                stats_service.execute({
+                    "db_service": db_service,
+                    "pet_id": str(pet_id),
+                    "duration_minutes": duration_minutes,
+                    "violations_to_add": 1
+                })
+                
+                db_service.update_dr("pet", pet_id, {
+                    "data.last_buzzer_start_time": None
+                })
+            
+            if hasattr(current_app, 'mqtt_manager'):
+                try:
+                    current_app.mqtt_manager.client.publish("casa/sound", "OFF")
                     print(f"  -> ✅ Stanza sicura ({room_name}). Disattivazione buzzer.")
-                    mqtt_client.publish("casa/sound", "OFF")
-            except Exception as e:
-                print(f"  -> [MQTT] Errore durante l'invio del comando: {e}")
+                except Exception as e:
+                    print(f"  -> [MQTT] Errore: {e}")
