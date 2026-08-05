@@ -26,11 +26,11 @@ dt_api = Blueprint('dt_api', __name__, url_prefix='/api/dt')
 # Create a blueprint for Digital Replica (DR) specific APIs with a base URL prefix
 dr_api = Blueprint('dr_api', __name__, url_prefix='/api/dr')
 
-# Create a blueprint for Digital Twin management and orchestration APIs with a base URL prefix
-dt_management_api = Blueprint('dt_management_api', __name__, url_prefix='/api/dt-management')
+# Create a blueprint for Users APIs with a base URL prefix (Plurale, nessun verbo)
+users_api = Blueprint('users_api', __name__, url_prefix='/api/users')
 
 # Create a blueprint for Authentication APIs with a base URL prefix
-user_api = Blueprint('user_api', __name__, url_prefix='/api/user')
+auth_api = Blueprint('auth_api', __name__, url_prefix='/api/auth')
 
 # Create the folder to save photos if it doesn't exist
 UPLOAD_FOLDER = 'uploads/cameras'
@@ -47,23 +47,16 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 def create_digital_twin():
     """
     Creates a new virtual Home environment uniquely associated with an Admin.
-    Requires a valid JWT token. Uses get_jwt_identity() to securely extract the user ID.
     Expects JSON payload: { "name": "...", "description": "..." }
     """
     try:
-        # Retrieve the JSON payload
         data = request.get_json()
-
-        # Securely extract the user ID directly from the validated token
         current_user_id = get_jwt_identity()
 
         required_fields = ['name', 'description']
         if not data or not all(field in data for field in required_fields):
-            return jsonify({
-                'error': 'Missing required fields: name, description'
-            }), 400
+            return jsonify({'error': 'Missing required fields: name, description'}), 400
 
-        # 1. Create the Digital Twin via the Factory
         dt_id = current_app.config['DT_FACTORY'].create_dt(
             name=data['name'],
             description=data['description'],
@@ -73,8 +66,6 @@ def create_digital_twin():
         current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='RoomStatisticsService')
         current_app.config['DT_FACTORY'].add_service(dt_id=dt_id, service_name='PetStatisticsService')
 
-
-        # 2. Update the user profile by adding the home to owned_homes
         doc = current_app.config['DB_SERVICE'].get_dr(dr_type='user', dr_id=current_user_id)
         current_homes = doc.get('data', {}).get('owned_homes', [])
         updated_homes = current_homes + [dt_id]
@@ -84,7 +75,6 @@ def create_digital_twin():
             update_data={'data.owned_homes': updated_homes}
         )
         
-
         return jsonify({
             'status': 'success',
             'message': 'Home environment created successfully',
@@ -97,51 +87,35 @@ def create_digital_twin():
         }), 201
 
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Failed to create Home Environment: {str(e)}'
-        }), 500
+        return jsonify({'status': 'error', 'message': f'Failed to create Home Environment: {str(e)}'}), 500
 
 
 # ----------------- HOME ENVIRONMENT REMOVAL (Admin) -----------------
-@dt_api.route('/', methods=['DELETE'])
+@dt_api.route('/<dt_id>', methods=['DELETE'])
 @jwt_required()
-def delete_digital_twin():
+def delete_digital_twin(dt_id):
     """
     Completely removes a Home environment and cascades the deletion to all associated 
-    Digital Replicas. Also cleans up the home ID from all user profiles (admins and viewers).
-    Requires Admin authorization via JWT token.
-    Expects JSON payload: { "dt_id": "string" }
+    Digital Replicas. ID is passed in the URL.
     """
     try:
-        data = request.get_json()
-        if not data or 'dt_id' not in data:
-            return jsonify({'error': 'Missing required field in payload: dt_id'}), 400
-            
-        dt_id = data['dt_id']
         current_user_id = get_jwt_identity()
 
-        # Check: Is the requesting user actually the admin of this home?
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Unauthorized. Only the administrator can delete this Home Environment.'}), 403
 
-        # Check: Does the home actually exist? 
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': 'Home Environment not found'}), 404
 
-        # --- CASCADE DELETE: Removal of associated Digital Replicas ---
         for replica in dt_exists.get("digital_replicas", []):
             try:
                 current_app.config['DB_SERVICE'].delete_dr(dr_type=replica["type"], dr_id=replica["id"])
             except Exception as e:
                 print(f"[WARNING] Failed to delete replica {replica['id']} of type {replica['type']}: {str(e)}")
 
-        # 1. Delete the Digital Twin via the Factory
         current_app.config['DT_FACTORY'].delete_dt(dt_id)
-
-        # 2. Global Cleanup: Remove the home ID from the arrays of ALL users
         current_app.config['DB_SERVICE'].remove_home_from_all_users(dt_id)
 
         return jsonify({
@@ -151,58 +125,44 @@ def delete_digital_twin():
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Failed to delete Home Environment: {str(e)}'}), 500
-    
 
-# ==============================================================================
-#                 DIGITAL TWIN MANAGEMENT APIs (dt_management_api)
-# ==============================================================================
 
 # ----------------- ADD VIEWER (by the Admin) -----------------
-@dt_management_api.route('/viewers', methods=['POST'])
+@dt_api.route('/<dt_id>/viewers', methods=['POST'])
 @jwt_required()
-def add_viewer():
+def add_viewer(dt_id):
     """
     Adds a viewer user to a specific Home Environment via their USERNAME.
-    Updates the viewer's 'viewable_homes' array in their profile.
-    Requires a valid JWT token representing the Admin.
-    Expects JSON payload: { "dt_id": "string", "viewer_username": "string" }
+    Expects JSON payload: { "viewer_username": "string" }
     """
     try:
         data = request.get_json()
-        
-        if not data or 'dt_id' not in data or 'viewer_username' not in data:
-            return jsonify({'error': 'Missing required fields: dt_id, viewer_username'}), 400
+        if not data or 'viewer_username' not in data:
+            return jsonify({'error': 'Missing required fields: viewer_username'}), 400
 
-        dt_id = data['dt_id']
         viewer_username = data['viewer_username']
         current_user_id = get_jwt_identity()
 
-        # 1. Verify that the user making the request is actually the admin
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Unauthorized. Only the administrator can add viewers.'}), 403
 
-        # 2. Verify the existence of the home
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': 'Home Environment not found'}), 404
 
-        # 3. Search for the viewer in the database via their username
         viewer_user = current_app.config['DB_SERVICE'].get_user_by_username(viewer_username)
         if not viewer_user:
             return jsonify({'error': f'The user {viewer_username} is not registered.'}), 404
         
         viewer_id = str(viewer_user['_id'])
 
-        # Prevent the admin from adding themselves as a viewer
         if viewer_id == current_user_id:
             return jsonify({'error': 'The admin cannot also be a viewer.'}), 400
 
-        # Check if the user is already a viewer
         if dt_id in viewer_user.get('data', {}).get('viewable_homes', []):
             return jsonify({'error': 'The user is already a viewer of this home.'}), 400
 
-        # 4. Save the permission in the user's viewable_homes array
         current_app.config['DB_SERVICE'].add_viewable_home(viewer_id, dt_id)
 
         return jsonify({
@@ -217,42 +177,25 @@ def add_viewer():
     
 
 # ----------------- VIEWER REMOVAL (by the Admin) -----------------
-@dt_management_api.route('/viewers', methods=['DELETE'])
+@dt_api.route('/<dt_id>/viewers/<viewer_id>', methods=['DELETE'])
 @jwt_required()
-def remove_viewer():
+def remove_viewer(dt_id, viewer_id):
     """
-    Removes a specific user's viewer access via their USERNAME.
-    Requires a valid JWT token representing the Admin.
-    Expects JSON payload: { "dt_id": "string", "viewer_username": "string" }
+    Removes a specific user's viewer access via their ID.
+    Both IDs are passed in the URL path.
     """
     try:
-        data = request.get_json()
-
-        if not data or 'dt_id' not in data or 'viewer_username' not in data:
-            return jsonify({'error': 'Missing required fields: dt_id, viewer_username'}), 400
-
-        dt_id = data['dt_id']
-        viewer_username = data['viewer_username']
         current_user_id = get_jwt_identity()
 
-        # Check: Is the requesting user actually the admin of this home?
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Unauthorized. Only the admin can remove viewers.'}), 403
-
-        # Search the database to find the viewer
-        viewer_user = current_app.config['DB_SERVICE'].get_user_by_username(viewer_username)
-        if not viewer_user:
-             return jsonify({'error': f'The user {viewer_username} is not registered.'}), 404
              
-        viewer_id = str(viewer_user['_id'])
-
-        # Remove the permission from the user's viewable_homes array
         current_app.config['DB_SERVICE'].remove_viewable_home(viewer_id, dt_id)
 
         return jsonify({
             'status': 'success',
-            'message': f'User {viewer_username} removed from viewers of Home {dt_id}'
+            'message': f'Viewer con ID {viewer_id} rimosso con successo dalla Home {dt_id}'
         }), 200
 
     except ValueError as ve:
@@ -265,56 +208,44 @@ def remove_viewer():
 #                            DIGITAL REPLICA APIs (dr_api)
 # ==============================================================================
 
-@dr_api.route('/<dr_type>', methods=['POST'])
+@dr_api.route('/<dt_id>/replicas/<dr_type>', methods=['POST'])
 @jwt_required()
-def create_and_associate_dr(dr_type):
+def create_and_associate_dr(dt_id, dr_type):
     """
-    Crea una Digital Replica universale in base al dr_type fornito nell'URL 
-    e la associa istantaneamente al Digital Twin (Home Environment).
+    Crea una Digital Replica e la associa al Digital Twin. 
+    L'ID del DT è nell'URL, il body contiene solo i dati della replica.
     """
     try:
         raw_data = request.get_json() or {}
 
-        # 1. Validazione di Base
-        if 'dt_id' not in raw_data or 'name' not in raw_data:
-            return jsonify({'error': 'Campi obbligatori mancanti: dt_id, name'}), 400
+        if 'name' not in raw_data:
+            return jsonify({'error': 'Campi obbligatori mancanti: name'}), 400
 
-        dt_id = raw_data['dt_id']
         dr_name = raw_data['name']
         current_user_id = get_jwt_identity()
 
-        # 2. Controllo Esistenza Factory Dinamica
         factory_key = f'DR_FACTORY_{dr_type.upper()}'
         dr_factory = current_app.config.get(factory_key)
         
         if not dr_factory:
-            return jsonify({'error': f'Tipo di Digital Replica non supportato o configurazione mancante: {dr_type}'}), 400
+            return jsonify({'error': f'Tipo di Digital Replica non supportato: {dr_type}'}), 400
 
-        # 3. Controllo Autorizzazioni (Solo Admin)
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Non autorizzato. Solo l\'amministratore può aggiungere repliche.'}), 403
 
-        # 4. Verifica Esistenza Digital Twin
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': f'Home Environment con ID {dt_id} non trovato'}), 404
 
-        # 5. Controllo Duplicati e Vincoli Specifici
         for replica in dt_exists.get("digital_replicas", []):
             if replica.get("type") == dr_type:
-                
-                # --- NUOVO VINCOLO: Massimo 1 Pet per Casa ---
                 if dr_type == 'pet':
-                    return jsonify({'error': 'Questa casa ha già un pet associato. È consentito un solo pet per Home Environment.'}), 409
-                # ---------------------------------------------
-                
-                # Controllo nome duplicato (es. due "Cucina" o due "Porta Principale")
+                    return jsonify({'error': 'Questa casa ha già un pet associato.'}), 409
                 existing_dr = current_app.config['DB_SERVICE'].get_dr(dr_type, replica["id"])
                 if existing_dr and existing_dr.get("profile", {}).get("name") == dr_name:
-                    return jsonify({'error': f'Un(a) {dr_type} con il nome "{dr_name}" esiste già in questa casa.'}), 409
+                    return jsonify({'error': f'Un(a) {dr_type} con il nome "{dr_name}" esiste già.'}), 409
 
-        # 6. Costruzione Dinamica del Payload Iniziale
         initial_data = {
             "profile": {
                 "name": dr_name,
@@ -322,33 +253,18 @@ def create_and_associate_dr(dr_type):
             }
         }
         
-        # Travaso dati dinamico per la validazione di Pydantic
         for key, value in raw_data.items():
-            if key not in ['dt_id', 'name', 'description']:
+            if key not in ['name', 'description']:
                 initial_data["profile"][key] = value
 
-        # 7. Validazione Pydantic
-        validated_dr = dr_factory.create_dr(
-            dr_type=dr_type,
-            initial_data=initial_data
-        )
-
-        # 8. Salvataggio nel Database
-        dr_id = current_app.config['DB_SERVICE'].save_dr(
-            dr_type=dr_type,
-            dr_data=validated_dr
-        )
-
-        # 9. Associazione al Digital Twin
-        current_app.config['DT_FACTORY'].add_digital_replica(
-            dt_id=dt_id,
-            dr_type=dr_type,
-            dr_id=dr_id
-        )
+        validated_dr = dr_factory.create_dr(dr_type=dr_type, initial_data=initial_data)
+        dr_id = current_app.config['DB_SERVICE'].save_dr(dr_type=dr_type, dr_data=validated_dr)
+        
+        current_app.config['DT_FACTORY'].add_digital_replica(dt_id=dt_id, dr_type=dr_type, dr_id=dr_id)
 
         return jsonify({
             'status': 'success',
-            'message': f'{dr_type.capitalize()} validato(a), creato(a) e collegato(a) con successo.',
+            'message': f'{dr_type.capitalize()} creato(a) e collegato(a) con successo.',
             'data': {
                 'home_id': dt_id,
                 f'{dr_type}_id': dr_id,
@@ -359,63 +275,40 @@ def create_and_associate_dr(dr_type):
     except ValueError as ve:
         return jsonify({'error': f'Validazione fallita: {str(ve)}'}), 400
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Errore durante la creazione di {dr_type}: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'Errore durante la creazione: {str(e)}'}), 500
 
     
-
-@dr_api.route('/<dr_type>', methods=['DELETE'])
+@dr_api.route('/<dt_id>/replicas/<dr_type>/<dr_id>', methods=['DELETE'])
 @jwt_required()
-def remove_digital_replica(dr_type):
+def remove_digital_replica(dt_id, dr_type, dr_id):
     """
-    Rimuove una Digital Replica specifica dal Database e la scollega dall'Home Environment.
-    Supporta dinamicamente tutti i tipi di DR registrati nel sistema.
+    Rimuove una Digital Replica specifica. Mantiene il dr_type per instradamento db.
     """
     try:
-        # 1. Verifica dinamica se il tipo di DR è supportato
         factory_key = f'DR_FACTORY_{dr_type.upper()}'
         if factory_key not in current_app.config:
             return jsonify({'error': f'Tipo di Digital Replica non supportato: {dr_type}'}), 400
 
-        raw_data = request.get_json() or {}
-
-        # 2. Controllo campi base
-        if 'dt_id' not in raw_data or 'dr_id' not in raw_data:
-            return jsonify({'error': 'Campi obbligatori mancanti: dt_id, dr_id'}), 400
-
-        dt_id = raw_data['dt_id']
-        dr_id = raw_data['dr_id']
         current_user_id = get_jwt_identity()
 
-        # 3. Controllo Autorizzazioni (Solo Admin)
         is_admin = current_app.config['DB_SERVICE'].is_home_admin(dt_id, current_user_id)
         if not is_admin:
             return jsonify({'error': 'Non autorizzato. Solo l\'admin può rimuovere i componenti.'}), 403
 
-        # 4. Verifica esistenza Digital Twin
         dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
         if not dt_exists:
             return jsonify({'error': f'Home Environment con ID {dt_id} non trovato'}), 404
 
-        # 5. Verifica che la replica appartenga effettivamente a questo Digital Twin
         dr_linked = any(
             replica.get("id") == dr_id and replica.get("type") == dr_type 
             for replica in dt_exists.get("digital_replicas", [])
         )
         
         if not dr_linked:
-            return jsonify({'error': f'{dr_type.capitalize()} specificato non è collegato a questa Casa.'}), 404
+            return jsonify({'error': f'{dr_type.capitalize()} non è collegato a questa Casa.'}), 404
 
-        # 6. Rimozione dal Database
-        current_app.config['DB_SERVICE'].delete_dr(
-            dr_type=dr_type, 
-            dr_id=dr_id
-        )
-
-        # 7. Disassociazione dal Digital Twin
-        current_app.config['DT_FACTORY'].remove_digital_replica(
-            dt_id=dt_id,
-            dr_id=dr_id
-        )
+        current_app.config['DB_SERVICE'].delete_dr(dr_type=dr_type, dr_id=dr_id)
+        current_app.config['DT_FACTORY'].remove_digital_replica(dt_id=dt_id, dr_id=dr_id)
 
         return jsonify({
             'status': 'success',
@@ -427,64 +320,42 @@ def remove_digital_replica(dr_type):
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Errore durante l\'eliminazione: {str(e)}'}), 500        
 
+
 # ----------------- CAMERA DEVICE AUTHENTICATION -------------------
-@dr_api.route('/rooms/auth', methods=['POST'])
+@dr_api.route('/devices/tokens', methods=['POST'])
 def device_login():
     """
     Endpoint for automatic authentication of IoT devices.
-    The device sends its name. The server checks the DB and issues a JWT.
     """
     data = request.get_json()
     if not data or 'room_name' not in data:
         return jsonify({'error': 'Device credentials missing'}), 400
 
     room_name = data.get('room_name')
-
-    # SQL/NoSQL QUERY (As per your schema): Verify that the device exists in the DB
     db_service = current_app.config['DB_SERVICE']
+    
     query = {"profile.name": room_name}
     rooms = db_service.query_drs("room", query)
 
     if not rooms:
         return jsonify({'error': 'Unauthorized or nonexistent device'}), 401
 
-    # HTTP 200 {JWT} (As per your schema): Generate a token without expiration (or long-lived)
-    # for the device, using "device_<room_name>" as identity
     access_token = create_access_token(identity=f"device_{room_name}")
     
-    return jsonify({
-        'status': 'success',
-        'access_token': access_token
-    }), 200
+    return jsonify({'status': 'success', 'access_token': access_token}), 200
 
 
 # ----------------- PHOTO RECEPTION (TELEMETRY) FROM ESP32-CAM -------------------
-@dr_api.route('/rooms/telemetry', methods=['POST'])
+@dr_api.route('/<dt_id>/rooms/<room_id>/telemetry', methods=['POST'])
 @jwt_required()
-def receive_telemetry():
+def receive_telemetry(dt_id, room_id):
     """
-    Receives telemetry (JSON) and photo (JPEG) from ESP32-CAM in multipart/form-data format.
-    Requires a valid JWT token (Bearer) for authorization.
+    Receives telemetry and photo from ESP32-CAM.
+    Hierarchy uses IDs: /api/dr/<dt_id>/rooms/<room_id>/telemetry
     """
     try:
-        # 1. Retrieve the textual part (the JSON) from the form-data
-        raw_data = request.form.get('data')
-        if not raw_data:
-            return jsonify({'error': 'JSON data field missing in the payload'}), 400
-            
-        # Parse the string into a Python dictionary
-        try:
-            telemetry_data = json.loads(raw_data)
-        except json.JSONDecodeError:
-            return jsonify({'error': 'Invalid JSON format'}), 400
-
-        home_id = telemetry_data.get('home_id')
-        room_name = telemetry_data.get('room_name')
-
-        if not home_id or not room_name:
-            return jsonify({'error': 'home_id or room_name missing in JSON'}), 400
-
-        # 2. Retrieve the image file from the form-data
+        home_id = dt_id 
+        
         if 'image' not in request.files:
             return jsonify({'error': 'Image file missing in the request'}), 400
             
@@ -493,29 +364,31 @@ def receive_telemetry():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
 
-        # 3. Save the image to disk
         if file:
-            # Generate a unique name based on the room and current timestamp
+            db_service = current_app.config['DB_SERVICE']
+            
+            # Fetch room details using the ID
+            room_dr = db_service.get_dr("room", room_id)
+            if not room_dr:
+                return jsonify({'error': 'Stanza non trovata'}), 404
+                
+            room_name = room_dr.get("profile", {}).get("name", "Unknown")
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = secure_filename(f"{room_name}_{timestamp}.jpg")
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             
-            # Physically save the file
             file.save(filepath)
             
-            # --- NUOVA INTEGRAZIONE YOLO TRAMITE DIGITAL TWIN SERVICE ---
             try:
                 dt_factory = current_app.config['DT_FACTORY']
-                db_service = current_app.config['DB_SERVICE']
                 pet_detector = current_app.config.get('PET_DETECTOR')
                 
-                # Recupera l'istanza del Digital Twin completamente inizializzata (DR + Servizi)
                 dt_instance = dt_factory.get_dt_instance(home_id)
                 
                 if not dt_instance:
                     print(f"[TELEMETRY] ERRORE: La casa con ID '{home_id}' non esiste nel database!")
                 else:
-                    # Chiediamo al Digital Twin di eseguire il servizio di rilevamento
                     dt_instance.execute_service(
                         service_name="PetDetectionService",
                         image_path=filepath,
@@ -527,13 +400,13 @@ def receive_telemetry():
             except ValueError as ve:
                 print(f"[TELEMETRY] Servizio non eseguito: {str(ve)}")
             except Exception as service_error:
-                print(f"[TELEMETRY ERROR] Eccezione durante l'esecuzione del servizio: {str(service_error)}")
-            # --------------------------------------------------
+                print(f"[TELEMETRY ERROR] Eccezione durante esecuzione servizio: {str(service_error)}")
 
             return jsonify({
                 'status': 'success',
                 'message': 'Photo received and processed successfully',
                 'data': {
+                    'room_id': room_id,
                     'room_name': room_name,
                     'saved_path': filepath
                 }
@@ -544,12 +417,12 @@ def receive_telemetry():
         
 
 # ==============================================================================
-#                            AUTHENTICATION APIs (user_api)
+#                            USERS APIs (users_api)
 # ==============================================================================
 
-@user_api.route('/register', methods=['POST'])
+@users_api.route('/', methods=['POST'])
 def register():
-    """Register a new user on the platform using the user.yaml template via DRFactory."""
+    """Register a new user on the platform."""
     try:
         data = request.get_json()
 
@@ -559,13 +432,9 @@ def register():
         username = data['username']
         password = data['password']
 
-        # Encrypt the password: NEVER save passwords in plain text!
         hashed_password = generate_password_hash(password)
-
-        # Ensure the unique index on 'profile.username' is established
         current_app.config['DB_SERVICE']._init_users_collection()
 
-        # 1. Structure the data to make it compatible with user.yaml
         initial_data = {
             "profile": {
                 "username": username,
@@ -577,13 +446,11 @@ def register():
             }
         }
 
-        # 2. PYDANTIC VALIDATION: delegate creation to the DRFactory
         validated_user = current_app.config['DR_FACTORY_USER'].create_dr(
             dr_type='user',
             initial_data=initial_data
         )
 
-        # 3. Save the validated replica (the user) to the database
         user_id = current_app.config['DB_SERVICE'].save_dr(
             dr_type='user',
             dr_data=validated_user
@@ -592,39 +459,35 @@ def register():
         return jsonify({
             'status': 'success',
             'message': 'User registered successfully.',
-            'data': {
-                'user_id': user_id,
-                'username': username
-            }
+            'data': {'user_id': user_id, 'username': username}
         }), 201
 
     except ValueError as ve:
-        # Catch Pydantic validation errors
         return jsonify({'error': str(ve)}), 400
     except Exception as e:
-        # Catch duplicate username errors from MongoDB unique index
         if "duplicate key error" in str(e).lower():
             return jsonify({'error': 'This username is already in use.'}), 409
         return jsonify({'error': f'Failed to register user: {str(e)}'}), 500
 
 
-@user_api.route('/login', methods=['POST'])
+# ==============================================================================
+#                         AUTHENTICATION APIs (auth_api)
+# ==============================================================================
+
+@auth_api.route('/tokens', methods=['POST'])
 def login():
-    """Authenticate a user, verify the password, and return a JWT."""
+    """Authenticate a user and create a JWT token."""
     try:
         data = request.get_json()
 
         if not data or not data.get('username') or not data.get('password'):
             return jsonify({'error': 'Username and password are required.'}), 400
 
-        # Retrieve the user from the database via the nested profile.username
         user = current_app.config['DB_SERVICE'].get_user_by_username(data['username'])
 
-        # Check if the user exists and if the hashed password inside 'profile' matches
         if not user or not check_password_hash(user['profile']['password'], data['password']):
             return jsonify({'error': 'Invalid credentials.'}), 401
 
-        # Generate the token by inserting the user's stringified ID as 'identity'
         user_id_str = str(user['_id'])
         access_token = create_access_token(identity=user_id_str)
 
@@ -632,47 +495,36 @@ def login():
             'status': 'success',
             'message': 'Login successful.',
             'access_token': access_token,
-            'data': {
-                'user_id': user_id_str,
-                'username': user['profile']['username']
-            }
+            'data': {'user_id': user_id_str, 'username': user['profile']['username']}
         }), 200
 
     except Exception as e:
         return jsonify({'error': f'Login failed: {str(e)}'}), 500
     
 
-@user_api.route('/logout', methods=['POST'])
+@auth_api.route('/tokens', methods=['DELETE'])
 @jwt_required()
 def logout():
-    """
-    Dummy endpoint to confirm client-side logout.
-    In a stateless JWT architecture, the server does not track logged-in users.
-    Logout is achieved by the frontend deleting the token from its local storage.
-    """
+    """Delete the JWT token / session."""
     return jsonify({
         "status": "success", 
         "message": "Logout successful. Please remove the token on the client side."
     }), 200
 
 
+# ==============================================================================
+#                        API STATISTICS (dt_api)
+# ==============================================================================
 
-# ==============================================================================
-#                        API STATISTICS
-# ==============================================================================
 @dt_api.route('/<dt_id>/statistics', methods=['GET'])
 @jwt_required()
 def get_home_statistics(dt_id):
-    """
-    Recupera le statistiche aggiornate in tempo reale di tutte le stanze 
-    associate a un determinato Home Environment.
-    """
+    """Recupera le statistiche aggiornate in tempo reale delle stanze."""
     try:
         current_user_id = get_jwt_identity()
         db_service = current_app.config['DB_SERVICE']
         dt_factory = current_app.config['DT_FACTORY']
 
-        # 1. Sicurezza: Verifica che l'utente abbia accesso a questa casa
         user = db_service.get_user_by_id(current_user_id)
         if not user:
             return jsonify({'error': 'Utente non trovato'}), 404
@@ -683,14 +535,12 @@ def get_home_statistics(dt_id):
         if dt_id not in owned_homes and dt_id not in viewable_homes:
             return jsonify({'error': 'Accesso negato. Non sei admin né viewer di questa casa.'}), 403
 
-        # 2. Recupero dei dati del Digital Twin
         dt_data = dt_factory.get_dt(dt_id)
         if not dt_data:
             return jsonify({'error': 'Home Environment non trovato'}), 404
 
         room_stats = []
 
-        # 3. Scansione delle Digital Replicas per trovare le stanze
         for replica in dt_data.get("digital_replicas", []):
             if replica.get("type") == "room":
                 room_dr = db_service.get_dr("room", replica.get("id"))
@@ -704,14 +554,11 @@ def get_home_statistics(dt_id):
                 last_entry_time = room_data.get("last_entry_time")
                 occupancy_stats = room_data.get("occupancy_stats", [])
                 
-                # Prendiamo i dati storicizzati nel DB (se la lista è vuota, inizializziamo a zero)
                 today_stats = occupancy_stats[0] if occupancy_stats else {
                     "daily_stay_duration_mins": 0.0,
-                    "dog_entries_count": 0
+                    "pet_entries_count": 0
                 }
                 
-                # --- CALCOLO IN TEMPO REALE ---
-                # Se il pet è attualmente nella stanza, calcoliamo da quanti minuti è entrato
                 current_session_mins = 0.0
                 if status == "occupied" and last_entry_time:
                     if isinstance(last_entry_time, str):
@@ -722,44 +569,38 @@ def get_home_statistics(dt_id):
                     time_diff = datetime.now(timezone.utc) - last_entry_time
                     current_session_mins = time_diff.total_seconds() / 60.0
                 
-                # Il tempo totale è il tempo storicizzato + il tempo dell'eventuale sessione in corso
                 total_duration = today_stats.get("daily_stay_duration_mins", 0.0) + current_session_mins
                 
                 room_stats.append({
                     "room_id": replica.get("id"),
                     "room_name": room_name,
                     "status": status,
-                    "daily_stay_duration_mins": round(total_duration, 2), # Arrotondato a 2 decimali
-                    "dog_entries_count": today_stats.get("dog_entries_count", 0),
+                    "daily_stay_duration_mins": round(total_duration, 2),
+                    "pet_entries_count": today_stats.get("pet_entries_count", 0),
                     "is_occupied_now": status == "occupied"
                 })
 
         return jsonify({
             'status': 'success',
-            'data': {
-                'home_id': dt_id,
-                'rooms': room_stats
-            }
+            'data': {'home_id': dt_id, 'rooms': room_stats}
         }), 200
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Errore nel recupero statistiche: {str(e)}'}), 500
     
 
-
-@dt_api.route('/<dt_id>/pet-statistics', methods=['GET'])
+@dt_api.route('/<dt_id>/pet/statistics', methods=['GET'])
 @jwt_required()
 def get_pet_statistics(dt_id):
     """
-    Recupera le statistiche aggiornate in tempo reale del pet (violazioni e buzzer)
-    associato a un determinato Home Environment.
+    Recupera le statistiche del pet al singolare: /<dt_id>/pet/statistics
+    Include lo storico completo (fino a 30 giorni) aggiornato in tempo reale.
     """
     try:
         current_user_id = get_jwt_identity()
         db_service = current_app.config['DB_SERVICE']
         dt_factory = current_app.config['DT_FACTORY']
 
-        # 1. Sicurezza: Verifica permessi sulla casa
         user = db_service.get_user_by_id(current_user_id)
         if not user:
             return jsonify({'error': 'Utente non trovato'}), 404
@@ -770,14 +611,12 @@ def get_pet_statistics(dt_id):
         if dt_id not in owned_homes and dt_id not in viewable_homes:
             return jsonify({'error': 'Accesso negato. Non sei admin né viewer di questa casa.'}), 403
 
-        # 2. Recupero Digital Twin
         dt_data = dt_factory.get_dt(dt_id)
         if not dt_data:
             return jsonify({'error': 'Home Environment non trovato'}), 404
 
         pet_stats = None
 
-        # 3. Ricerca del Pet all'interno della casa
         for replica in dt_data.get("digital_replicas", []):
             if replica.get("type") == "pet":
                 pet_dr = db_service.get_dr("pet", replica.get("id"))
@@ -790,17 +629,10 @@ def get_pet_statistics(dt_id):
                 last_buzzer_start = pet_data.get("last_buzzer_start_time")
                 daily_buzzer_stats = pet_data.get("daily_buzzer_stats", [])
                 
-                # Inizializza i dati storici a 0 se l'array è vuoto
-                today_stats = daily_buzzer_stats[0] if daily_buzzer_stats else {
-                    "auto_duration_mins": 0.0,
-                    "auto_violations_count": 0
-                }
-                
-                # --- CALCOLO IN TEMPO REALE ---
+                # --- 1. CALCOLO DELLA SESSIONE IN TEMPO REALE ---
                 current_session_mins = 0.0
                 current_violation = 0
                 
-                # Se il buzzer è attualmente attivo, calcoliamo il tempo in corso
                 if last_buzzer_start:
                     if isinstance(last_buzzer_start, str):
                         last_buzzer_start = datetime.fromisoformat(last_buzzer_start.replace("Z", "+00:00"))
@@ -809,24 +641,40 @@ def get_pet_statistics(dt_id):
                         
                     time_diff = datetime.now(timezone.utc) - last_buzzer_start
                     current_session_mins = time_diff.total_seconds() / 60.0
-                    
-                    # Contiamo la violazione attuale che non è ancora stata storicizzata
                     current_violation = 1 
                 
-                # Somma i dati salvati con quelli calcolati dinamicamente
-                total_duration = today_stats.get("auto_duration_mins", 0.0) + current_session_mins
-                total_violations = today_stats.get("auto_violations_count", 0) + current_violation
+                # --- 2. AGGIORNAMENTO STORICO ---
+                if daily_buzzer_stats:
+                    # Assumiamo che il primo elemento (indice 0) sia la giornata di oggi
+                    today_stats = daily_buzzer_stats[0]
+                    today_stats["auto_duration_mins"] = round(today_stats.get("auto_duration_mins", 0.0) + current_session_mins, 2)
+                    today_stats["auto_violations_count"] = today_stats.get("auto_violations_count", 0) + current_violation
+                else:
+                    # Se l'array è vuoto, creiamo noi l'elemento di oggi
+                    daily_buzzer_stats = [{
+                        "date": datetime.now(timezone.utc).isoformat(),
+                        "auto_duration_mins": round(current_session_mins, 2),
+                        "auto_violations_count": current_violation
+                    }]
+
+                # --- 3. SANITIZZAZIONE DATE PER JSON ---
+                # Evita crash di jsonify se PyMongo restituisce date in formato non standard
+                for stat in daily_buzzer_stats:
+                    date_val = stat.get("date")
+                    if isinstance(date_val, dict) and "$date" in date_val:
+                        stat["date"] = date_val["$date"]
+                    elif isinstance(date_val, datetime):
+                        stat["date"] = date_val.isoformat()
                 
                 pet_stats = {
                     "pet_id": replica.get("id"),
                     "pet_name": pet_name,
                     "current_room": pet_data.get("current_room", ""),
-                    "auto_duration_mins": round(total_duration, 2),
-                    "auto_violations_count": total_violations,
-                    "is_buzzer_active_now": bool(last_buzzer_start)
+                    "is_buzzer_active_now": bool(last_buzzer_start),
+                    "daily_buzzer_stats": daily_buzzer_stats  # Restituiamo tutto l'array
                 }
                 
-                # Dato che c'è solo un pet per casa, possiamo interrompere il ciclo
+                # Dato che c'è solo un pet per casa, interrompiamo il ciclo
                 break 
 
         if not pet_stats:
@@ -843,6 +691,186 @@ def get_pet_statistics(dt_id):
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Errore nel recupero statistiche pet: {str(e)}'}), 500
     
+
+# ----------------- GET USER HOMES (Admin & Viewer) -----------------
+@dt_api.route('/', methods=['GET'])
+@jwt_required()
+def get_user_homes():
+    """
+    Recupera tutte le case (Digital Twins) associate all'utente autenticato,
+    suddividendole tra quelle di cui è proprietario (admin) e quelle di cui è viewer.
+    """
+    try:
+        # Estrae l'ID dell'utente dal token JWT
+        current_user_id = get_jwt_identity()
+        db_service = current_app.config['DB_SERVICE']
+        dt_factory = current_app.config['DT_FACTORY']
+
+        # Recupera il documento utente dal database
+        user = db_service.get_user_by_id(current_user_id)
+        if not user:
+            return jsonify({'error': 'Utente non trovato'}), 404
+
+        # Estrae gli array degli ID delle case
+        owned_home_ids = user.get('data', {}).get('owned_homes', [])
+        viewable_home_ids = user.get('data', {}).get('viewable_homes', [])
+
+        owned_homes = []
+        viewable_homes = []
+
+        # Recupera i dettagli per le case di proprietà
+        for dt_id in owned_home_ids:
+            dt = dt_factory.get_dt(dt_id)
+            if dt:
+                owned_homes.append({
+                    'home_id': dt_id,
+                    'name': dt.get('name', 'Unknown'),
+                    'description': dt.get('description', ''),
+                    'role': 'admin'
+                })
+
+        # Recupera i dettagli per le case visibili come viewer
+        for dt_id in viewable_home_ids:
+            dt = dt_factory.get_dt(dt_id)
+            if dt:
+                viewable_homes.append({
+                    'home_id': dt_id,
+                    'name': dt.get('name', 'Unknown'),
+                    'description': dt.get('description', ''),
+                    'role': 'viewer'
+                })
+
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'owned_homes': owned_homes,
+                'viewable_homes': viewable_homes
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error', 
+            'message': f'Errore nel recupero delle case: {str(e)}'
+        }), 500
+    
+
+# ----------------- GET HOME MANAGEMENT DATA (Admin) -----------------
+@dt_api.route('/<dt_id>/management', methods=['GET'])
+@jwt_required()
+def get_home_management(dt_id):
+    """Recupera tutti i componenti e i viewer per la gestione admin."""
+    try:
+        current_user_id = get_jwt_identity()
+        db_service = current_app.config['DB_SERVICE']
+        dt_factory = current_app.config['DT_FACTORY']
+
+        user = db_service.get_user_by_id(current_user_id)
+        if not user:
+            return jsonify({'error': 'Utente non trovato'}), 404
+
+        owned_homes = user.get('data', {}).get('owned_homes', [])
+        if dt_id not in owned_homes:
+            return jsonify({'error': 'Accesso negato. Solo l\'admin può gestire la casa.'}), 403
+
+        dt_data = dt_factory.get_dt(dt_id)
+        if not dt_data: return jsonify({'error': 'Casa non trovata'}), 404
+
+        rooms, doors, pets, viewers = [], [], [], []
+
+        for replica in dt_data.get("digital_replicas", []):
+            # Convertiamo l'ID in stringa per sicurezza
+            raw_id = replica.get("id")
+            str_id = str(raw_id) if not isinstance(raw_id, str) else raw_id
+            
+            dr = db_service.get_dr(replica["type"], str_id)
+            if dr:
+                item = {"id": str(dr["_id"]), "name": dr.get("profile", {}).get("name", "N/A")}
+                if replica["type"] == "room":
+                    item['permission'] = dr.get("profile", {}).get("permission_level", "allowed")
+                    rooms.append(item)
+                elif replica["type"] == "door":
+                    doors.append(item)
+                elif replica["type"] == "pet":
+                    pets.append(item)
+
+        # Recupera i viewer cercando gli utenti che hanno questo dt_id nei viewable_homes
+        viewer_users = db_service.query_drs("user", {"data.viewable_homes": dt_id})
+        for v_user in viewer_users:
+            viewers.append({
+                "id": str(v_user["_id"]),
+                "username": v_user.get("profile", {}).get("username", "N/A")
+            })
+
+        return jsonify({
+            'status': 'success',
+            'data': {'rooms': rooms, 'doors': doors, 'pets': pets, 'viewers': viewers}
+        }), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+
+@users_api.route('/<user_id>', methods=['DELETE'])
+@jwt_required()
+def delete_user(user_id):
+    """
+    Elimina l'account di un utente.
+    Requisito di sicurezza: Un utente può eliminare SOLO il proprio account.
+    Esegue un'eliminazione a cascata di tutte le case di cui è amministratore.
+    """
+    try:
+        # Estraiamo l'identità dal token di chi sta facendo la richiesta
+        current_user_id = get_jwt_identity()
+
+        # SICUREZZA: Controlliamo che l'ID nell'URL corrisponda a quello del token
+        if str(current_user_id) != str(user_id):
+            return jsonify({
+                'error': 'Azione non autorizzata. Puoi eliminare esclusivamente il tuo account.'
+            }), 403
+
+        db_service = current_app.config['DB_SERVICE']
+        dt_factory = current_app.config['DT_FACTORY']
+
+        # Recuperiamo i dati dell'utente per scoprire quali case possiede
+        user = db_service.get_user_by_id(user_id)
+        if not user:
+            return jsonify({'error': 'Utente non trovato.'}), 404
+
+        # 1. ELIMINAZIONE A CASCATA: Rimuoviamo tutte le case di cui è amministratore
+        owned_homes = user.get('data', {}).get('owned_homes', [])
+        
+        for home_id in owned_homes:
+            dt_exists = dt_factory.get_dt(home_id)
+            if dt_exists:
+                # 1A. Elimina tutte le repliche (stanze, pet, etc.) associate alla casa
+                for replica in dt_exists.get("digital_replicas", []):
+                    try:
+                        db_service.delete_dr(dr_type=replica["type"], dr_id=replica["id"])
+                    except Exception as e:
+                        print(f"[WARNING] Errore eliminazione replica {replica['id']}: {str(e)}")
+
+                # 1B. Elimina il Digital Twin della casa
+                dt_factory.delete_dt(home_id)
+                
+                # 1C. Rimuove la casa dalle liste "viewable_homes" di eventuali altri utenti viewer
+                db_service.remove_home_from_all_users(home_id)
+
+        # 2. ELIMINAZIONE UTENTE: Infine, cancelliamo il documento dell'utente stesso
+        db_service.delete_dr(dr_type='user', dr_id=user_id)
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Account e tutti gli ambienti associati eliminati con successo.'
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error', 
+            'message': f'Errore durante l\'eliminazione dell\'account: {str(e)}'
+        }), 500
+
+    
 # ==============================================================================
 #                       BLUEPRINTS REGISTRATION UTILITY
 # ==============================================================================
@@ -851,5 +879,5 @@ def register_api_blueprints(app):
     """Register all API blueprints with the Flask app"""
     app.register_blueprint(dt_api)
     app.register_blueprint(dr_api)
-    app.register_blueprint(dt_management_api)
-    app.register_blueprint(user_api)
+    app.register_blueprint(users_api)
+    app.register_blueprint(auth_api)

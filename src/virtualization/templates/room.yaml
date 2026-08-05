@@ -51,7 +51,7 @@ schemas:
           type_mappings:
             date: datetime
             daily_stay_duration_mins: float
-            dog_entries_count: int
+            pet_entries_count: int
       last_entry_time:
         type: datetime
 

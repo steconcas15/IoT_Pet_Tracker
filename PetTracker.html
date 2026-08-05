@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pet Tracking System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f8f9fa; }
+        .card { border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .nav-pill { cursor: pointer; }
+        .hidden { display: none; }
+        .status-occupied { color: #dc3545; font-weight: bold; }
+        .status-empty { color: #198754; font-weight: bold; }
+        .buzzer-active { animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .refresh-btn { cursor: pointer; border: none; background: transparent; color: #6c757d; }
+        .refresh-btn:hover { color: #0d6efd; }
+        .chart-btn { border-radius: 12px; padding: 15px 20px; transition: transform 0.2s; }
+        .chart-btn:hover { transform: translateY(-3px); }
+        .navbar-brand { cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+    <div class="container">
+        <a class="navbar-brand" onclick="brandClick()"><i class="bi bi-camera-reels"></i> Pet Tracking System</a>
+        <div class="d-flex align-items-center" id="navActions"></div>
+    </div>
+</nav>
+
+<div class="container" id="appContainer">
+    
+    <!-- LOGIN / REGISTER VIEW -->
+    <div id="authView" class="row justify-content-center">
+        <div class="col-md-5">
+            <div class="card p-4">
+                <ul class="nav nav-pills nav-justified mb-4">
+                    <li class="nav-item"><a class="nav-link active nav-pill" id="loginTab">Login</a></li>
+                    <li class="nav-item"><a class="nav-link nav-pill" id="registerTab">Register</a></li>
+                </ul>
+                <form id="loginForm">
+                    <div class="mb-3"><label class="form-label">Username</label><input type="text" class="form-control" id="loginUsername" required></div>
+                    <div class="mb-3"><label class="form-label">Password</label><input type="password" class="form-control" id="loginPassword" required></div>
+                    <button type="submit" class="btn btn-primary w-100">Login</button>
+                </form>
+                <form id="registerForm" class="hidden">
+                    <div class="mb-3"><label class="form-label">Username</label><input type="text" class="form-control" id="regUsername" required></div>
+                    <div class="mb-3"><label class="form-label">Password</label><input type="password" class="form-control" id="regPassword" required></div>
+                    <button type="submit" class="btn btn-success w-100">Create Account</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- HOME SELECTION VIEW -->
+    <div id="homeSelectionView" class="hidden">
+        <h2 class="mb-4 text-center">Your Homes</h2>
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div id="homesListContainer" class="d-grid gap-3"></div>
+                <div class="text-center mt-4">
+                    <button class="btn btn-outline-primary" onclick="showCreateHomeForm()"><i class="bi bi-plus-circle"></i> Create New Home</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SETUP WIZARD VIEW -->
+    <div id="setupView" class="hidden">
+        <h2 class="mb-4 text-center">Environment Setup</h2>
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card p-4" id="stepHome">
+                    <h5><i class="bi bi-house-door"></i> Step 1: Create Home Environment</h5>
+                    <form id="createHomeForm" class="mt-3">
+                        <div class="input-group mb-2">
+                            <span class="input-group-text">Name</span>
+                            <input type="text" class="form-control" id="homeName" placeholder="Home Name" required>
+                        </div>
+                        <div class="input-group mb-2">
+                            <span class="input-group-text">Description</span>
+                            <textarea class="form-control" id="homeDesc" placeholder="Brief description"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Create Home</button>
+                    </form>
+                </div>
+                <div class="card p-4 hidden" id="stepComponents">
+                    <h5><i class="bi bi-diagram-3"></i> Step 2: Add Components</h5>
+                    
+                    <div class="border rounded p-3 mb-3 bg-light">
+                        <h6>Create Room</h6>
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text">Name</span>
+                            <input type="text" class="form-control" id="roomName" placeholder="e.g. Kitchen">
+                        </div>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">Floor</span>
+                            <input type="number" class="form-control" id="roomFloor" value="0" style="max-width: 80px;">
+                            <span class="input-group-text">Permission</span>
+                            <select class="form-select" id="roomPermission" style="max-width: 130px;">
+                                <option value="allowed">Allowed</option>
+                                <option value="forbidden">Forbidden</option>
+                            </select>
+                            <button class="btn btn-success" onclick="createReplica('room')"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="border rounded p-3 mb-3 bg-light">
+                        <h6>Create Door</h6>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">Name</span>
+                            <input type="text" class="form-control" id="doorName" placeholder="e.g. Front Door">
+                            <button class="btn btn-success" onclick="createReplica('door')"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="border rounded p-3 mb-3 bg-light border-primary">
+                        <h6>Create Pet</h6>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">Name</span>
+                            <input type="text" class="form-control" id="petName" placeholder="e.g. Fido">
+                            <button class="btn btn-warning" onclick="createReplica('pet')"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                    </div>
+
+                    <div id="setupStatus" class="text-muted small mt-2"></div>
+                    <button id="goToDashboardBtn" class="btn btn-primary mt-3 hidden w-100" onclick="showDashboard()">Go to Dashboard</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DASHBOARD VIEW -->
+    <div id="dashboardView" class="hidden">
+        <div class="d-flex justify-content-between align-items-center mb-5">
+            <div>
+                <a href="#" onclick="goBackToHomeSelection()" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left"></i> Change Home</a>
+                <h3 class="mt-1"><i class="bi bi-speedometer2"></i> Dashboard</h3>
+            </div>
+        </div>
+        
+        <div class="d-flex justify-content-center gap-4 mb-5">
+            <button class="btn btn-info text-white chart-btn btn-lg d-flex align-items-center" onclick="openRoomCharts()">
+                <i class="bi bi-bar-chart-line-fill fs-3 me-2"></i> Room Charts
+            </button>
+            <button class="btn btn-warning text-dark chart-btn btn-lg d-flex align-items-center" onclick="openPetCharts()">
+                <i class="bi bi-graph-up-arrow fs-3 me-2"></i> Pet Charts
+            </button>
+        </div>
+
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card p-4 text-center shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="text-muted mb-0">Pet Location</h5>
+                        <button class="refresh-btn" onclick="fetchPetStats()"><i class="bi bi-arrow-clockwise fs-5"></i></button>
+                    </div>
+                    <i class="bi bi-geo-alt-fill display-4 text-primary my-4"></i>
+                    <h4 id="petNameDisplay">No Pet</h4>
+                    <p class="mb-0 fs-5">In: <strong id="petCurrentRoom">-</strong></p>
+                    <div class="mt-3"><span id="buzzerStatus" class="badge bg-secondary fs-6">Buzzer OFF</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MANAGEMENT VIEW (Admin) -->
+    <div id="managementView" class="hidden">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <a href="#" onclick="showDashboard()" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left"></i> Back to Dashboard</a>
+                <h3 class="mt-1"><i class="bi bi-gear"></i> Home Management</h3>
+            </div>
+        </div>
+
+        <div class="card p-3 mb-4 bg-light">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="form-label text-muted small mb-0">Home ID</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="toggleIdVisibility('mgmtHomeId', this)">Show ID</button>
+            </div>
+            <p class="text-monospace small text-break mb-0 mt-2 hidden" id="mgmtHomeId">-</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card p-4 mb-4">
+                    <h5>Rooms</h5>
+                    <ul id="mgmtRooms" class="list-group mb-3"></ul>
+                    <div class="input-group input-group-sm mb-2">
+                        <span class="input-group-text">Name</span>
+                        <input type="text" id="mgmtRoomName" class="form-control" placeholder="e.g. Bedroom">
+                    </div>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">Floor</span>
+                        <input type="number" id="mgmtRoomFloor" class="form-control" value="0" style="max-width: 80px;">
+                        <span class="input-group-text">Permission</span>
+                        <select id="mgmtRoomPerm" class="form-select" style="max-width: 120px;">
+                            <option value="allowed">Allowed</option>
+                            <option value="forbidden">Forbidden</option>
+                        </select>
+                        <button class="btn btn-success" onclick="addReplicaMgmt('room')"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card p-4 mb-4">
+                    <h5>Doors</h5>
+                    <ul id="mgmtDoors" class="list-group mb-3"></ul>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">Name</span>
+                        <input type="text" id="mgmtDoorName" class="form-control" placeholder="e.g. Back Door">
+                        <button class="btn btn-success" onclick="addReplicaMgmt('door')"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card p-4 mb-4">
+                    <h5>Pet</h5>
+                    <ul id="mgmtPets" class="list-group mb-3"></ul>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">Name</span>
+                        <input type="text" id="mgmtPetName" class="form-control" placeholder="e.g. Rex">
+                        <button class="btn btn-success" onclick="addReplicaMgmt('pet')"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card p-4 mb-4">
+                    <h5>Viewers</h5>
+                    <ul id="mgmtViewers" class="list-group mb-3"></ul>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">Username</span>
+                        <input type="text" id="mgmtViewerUsername" class="form-control" placeholder="e.g. john_doe">
+                        <button class="btn btn-success" onclick="addViewerMgmt()"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROFILE VIEW -->
+    <div id="profileView" class="hidden">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3 class="mb-0"><i class="bi bi-person-circle"></i> User Profile</h3>
+                        <a href="#" onclick="goBackFromProfile()" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left"></i> Back</a>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label text-muted small mb-0">Username</label>
+                        <h5 id="profileUsername" class="mt-1">-</h5>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label text-muted small mb-0">User ID</label>
+                        <p class="text-monospace small text-break bg-light p-2 rounded mt-1" id="profileUserId">-</p>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <div class="card border-danger p-3">
+                        <h6 class="text-danger">Danger Zone</h6>
+                        <p class="small text-muted">Deleting your account will permanently remove all your homes, rooms, pets, and statistics. This action cannot be undone.</p>
+                        <button class="btn btn-danger" onclick="deleteAccount()"><i class="bi bi-trash"></i> Delete My Account</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL ROOM CHARTS -->
+<div class="modal fade" id="roomChartsModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Daily Room Statistics</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6 mb-4"><canvas id="chartRoomEntries"></canvas></div>
+                    <div class="col-md-6 mb-4"><canvas id="chartRoomDuration"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL PET CHARTS -->
+<div class="modal fade" id="petChartsModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Monthly Pet Statistics</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6 mb-4"><canvas id="chartPetViolations"></canvas></div>
+                    <div class="col-md-6 mb-4"><canvas id="chartPetAvgTime"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const API_BASE_URL = 'http://10.101.219.100:5000/api'; 
+    let authToken = localStorage.getItem('petTrackToken');
+    let currentHomeId = localStorage.getItem('currentHomeId');
+    let currentHomeRole = localStorage.getItem('currentHomeRole');
+    let roomChart1 = null, roomChart2 = null, petChart1 = null, petChart2 = null;
+
+    const authView = document.getElementById('authView');
+    const homeSelectionView = document.getElementById('homeSelectionView');
+    const setupView = document.getElementById('setupView');
+    const dashboardView = document.getElementById('dashboardView');
+    const managementView = document.getElementById('managementView');
+    const profileView = document.getElementById('profileView');
+    
+    let previousViewBeforeProfile = null; 
+
+    window.onload = function() {
+        if (authToken) {
+            if (currentHomeId) showDashboard();
+            else checkUserHomes();
+        } else {
+            showAuthView();
+        }
+    };
+
+    document.getElementById('loginTab').addEventListener('click', function() { toggleAuthTab('login'); });
+    document.getElementById('registerTab').addEventListener('click', function() { toggleAuthTab('register'); });
+
+    function toggleAuthTab(tab) {
+        document.getElementById('loginForm').classList.toggle('hidden', tab !== 'login');
+        document.getElementById('registerForm').classList.toggle('hidden', tab !== 'register');
+        document.getElementById('loginTab').classList.toggle('active', tab === 'login');
+        document.getElementById('registerTab').classList.toggle('active', tab === 'register');
+    }
+
+    function hideAllViews() {
+        authView.classList.add('hidden');
+        homeSelectionView.classList.add('hidden');
+        setupView.classList.add('hidden');
+        dashboardView.classList.add('hidden');
+        managementView.classList.add('hidden');
+        profileView.classList.add('hidden');
+    }
+
+    function brandClick() {
+        if (!authToken) return showAuthView();
+        if (currentHomeId) showDashboard();
+        else checkUserHomes();
+    }
+
+    function showAuthView() {
+        hideAllViews();
+        authView.classList.remove('hidden');
+        document.getElementById('navActions').innerHTML = '';
+    }
+
+    function showHomeSelectionView() {
+        hideAllViews();
+        homeSelectionView.classList.remove('hidden');
+        document.getElementById('navActions').innerHTML = `
+            <button class="btn btn-outline-light btn-sm me-2" onclick="showProfile()"><i class="bi bi-person-circle fs-5"></i></button>
+            <button class="btn btn-outline-light btn-sm" onclick="logout()">Logout</button>
+        `;
+    }
+
+    function showCreateHomeForm() {
+        hideAllViews();
+        setupView.classList.remove('hidden');
+        document.getElementById('stepHome').classList.remove('hidden');
+        document.getElementById('stepComponents').classList.add('hidden');
+        document.getElementById('navActions').innerHTML = `
+            <button class="btn btn-outline-light btn-sm me-2" onclick="showProfile()"><i class="bi bi-person-circle fs-5"></i></button>
+            <button class="btn btn-outline-light btn-sm" onclick="logout()">Logout</button>
+        `;
+    }
+
+    function showDashboard() {
+        hideAllViews();
+        dashboardView.classList.remove('hidden');
+        
+        let navHtml = `
+            <button class="btn btn-outline-light btn-sm me-2" onclick="showProfile()"><i class="bi bi-person-circle fs-5"></i></button>
+        `;
+        if (currentHomeRole === 'admin') {
+            navHtml += `<button class="btn btn-outline-light btn-sm me-2" onclick="showManagement()"><i class="bi bi-gear"></i> Management</button>`;
+        }
+        navHtml += `<button class="btn btn-outline-light btn-sm" onclick="logout()">Logout</button>`;
+        document.getElementById('navActions').innerHTML = navHtml;
+        
+        fetchPetStats(); 
+    }
+
+    function showManagement() {
+        hideAllViews();
+        managementView.classList.remove('hidden');
+        document.getElementById('mgmtHomeId').innerText = currentHomeId;
+        fetchManagementData();
+    }
+
+    function toggleIdVisibility(idElement, btnElement) {
+        const el = document.getElementById(idElement);
+        el.classList.toggle('hidden');
+        if (el.classList.contains('hidden')) {
+            btnElement.innerText = 'Show ID';
+        } else {
+            btnElement.innerText = 'Hide ID';
+        }
+    }
+
+    function showProfile() {
+        if (!dashboardView.classList.contains('hidden')) previousViewBeforeProfile = 'dashboard';
+        else if (!homeSelectionView.classList.contains('hidden')) previousViewBeforeProfile = 'home';
+        else if (!setupView.classList.contains('hidden')) previousViewBeforeProfile = 'setup';
+        else if (!managementView.classList.contains('hidden')) previousViewBeforeProfile = 'management';
+
+        hideAllViews();
+        profileView.classList.remove('hidden');
+
+        document.getElementById('profileUsername').innerText = localStorage.getItem('petTrackUsername') || 'Unknown';
+        document.getElementById('profileUserId').innerText = localStorage.getItem('petTrackUserId') || 'Unknown';
+    }
+
+    function goBackFromProfile() {
+        if (previousViewBeforeProfile === 'dashboard') showDashboard();
+        else if (previousViewBeforeProfile === 'home') showHomeSelectionView();
+        else if (previousViewBeforeProfile === 'setup') showCreateHomeForm();
+        else if (previousViewBeforeProfile === 'management') showManagement();
+        else showHomeSelectionView(); 
+    }
+
+    async function apiCall(endpoint, method = 'GET', body = null) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+        const res = await fetch(API_BASE_URL + endpoint, { 
+            method: method, 
+            headers: headers, 
+            body: body ? JSON.stringify(body) : null 
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || data.message || 'API Error');
+        return data;
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        try {
+            const res = await apiCall('/auth/tokens', 'POST', {
+                username: document.getElementById('loginUsername').value,
+                password: document.getElementById('loginPassword').value
+            });
+            authToken = res.access_token;
+            localStorage.setItem('petTrackToken', authToken);
+            localStorage.setItem('petTrackUserId', res.data.user_id);
+            localStorage.setItem('petTrackUsername', res.data.username);
+            
+            checkUserHomes();
+        } catch (err) { alert(err.message); }
+    });
+
+    document.getElementById('registerForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        try {
+            await apiCall('/users/', 'POST', {
+                username: document.getElementById('regUsername').value,
+                password: document.getElementById('regPassword').value
+            });
+            alert('Registration successful! Please log in.');
+            toggleAuthTab('login');
+        } catch (err) { alert(err.message); }
+    });
+
+    async function logout() {
+        try { await apiCall('/auth/tokens', 'DELETE'); } catch (e) {}
+        localStorage.removeItem('petTrackToken');
+        localStorage.removeItem('currentHomeId');
+        localStorage.removeItem('currentHomeRole');
+        localStorage.removeItem('petTrackUserId');
+        localStorage.removeItem('petTrackUsername');
+        authToken = null; currentHomeId = null; currentHomeRole = null;
+        showAuthView();
+    }
+
+    async function checkUserHomes() {
+        try {
+            const res = await apiCall('/dt/', 'GET');
+            const allHomes = [...(res.data.owned_homes || []), ...(res.data.viewable_homes || [])];
+            if (allHomes.length > 0) {
+                renderHomeList(allHomes);
+                showHomeSelectionView();
+            } else {
+                showCreateHomeForm();
+            }
+        } catch (err) { showAuthView(); }
+    }
+
+    function renderHomeList(homes) {
+        const container = document.getElementById('homesListContainer');
+        container.innerHTML = '';
+        homes.forEach(function(home) {
+            const roleBadge = home.role === 'admin' ? '<span class="badge bg-primary ms-2">Admin</span>' : '<span class="badge bg-info text-dark ms-2">Viewer</span>';
+            
+            let actions = '<button class="btn btn-success" onclick="selectHome(\'' + home.home_id + '\', \'' + home.role + '\')">Enter <i class="bi bi-arrow-right"></i></button>';
+            
+            if (home.role === 'admin') {
+                actions = `
+                    <button class="btn btn-success me-2" onclick="selectHome('${home.home_id}', '${home.role}')">Enter</button>
+                    <button class="btn btn-danger" onclick="deleteHome('${home.home_id}')" title="Delete Home"><i class="bi bi-trash"></i></button>
+                `;
+            }
+
+            container.innerHTML += `
+                <div class="card p-3 d-flex justify-content-between align-items-center flex-row">
+                    <div>
+                        <h5 class="mb-1">${home.name} ${roleBadge}</h5>
+                        <p class="mb-0 text-muted small">${home.description || ''}</p>
+                    </div>
+                    <div class="d-flex align-items-center">${actions}</div>
+                </div>
+            `;
+        });
+    }
+
+    async function deleteHome(homeId) {
+        if(!confirm('Are you sure you want to delete this home? This action cannot be undone.')) return;
+        try {
+            await apiCall('/dt/' + homeId, 'DELETE');
+            checkUserHomes(); 
+        } catch(err) { 
+            alert("Error deleting home: " + err.message); 
+        }
+    }
+
+    function selectHome(homeId, role) {
+        currentHomeId = homeId; currentHomeRole = role;
+        localStorage.setItem('currentHomeId', currentHomeId);
+        localStorage.setItem('currentHomeRole', currentHomeRole);
+        showDashboard();
+    }
+
+    function goBackToHomeSelection() {
+        localStorage.removeItem('currentHomeId');
+        localStorage.removeItem('currentHomeRole');
+        currentHomeId = null; currentHomeRole = null;
+        checkUserHomes();
+    }
+
+    document.getElementById('createHomeForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        try {
+            const res = await apiCall('/dt/', 'POST', {
+                name: document.getElementById('homeName').value,
+                description: document.getElementById('homeDesc').value || "No description"
+            });
+            currentHomeId = res.data.home_id; currentHomeRole = 'admin';
+            localStorage.setItem('currentHomeId', currentHomeId);
+            localStorage.setItem('currentHomeRole', currentHomeRole);
+            document.getElementById('stepHome').classList.add('hidden');
+            document.getElementById('stepComponents').classList.remove('hidden');
+        } catch (err) { alert(err.message); }
+    });
+
+    async function createReplica(type) {
+        let nameInput, extraData = {};
+        if (type === 'room') {
+            nameInput = document.getElementById('roomName').value;
+            extraData.permission_level = document.getElementById('roomPermission').value;
+            extraData.floor = parseInt(document.getElementById('roomFloor').value) || 0;
+        } else if (type === 'door') nameInput = document.getElementById('doorName').value;
+        else if (type === 'pet') nameInput = document.getElementById('petName').value;
+        
+        if (!nameInput) return alert('Please enter a name');
+        try {
+            const res = await apiCall('/dr/' + currentHomeId + '/replicas/' + type, 'POST', { name: nameInput, ...extraData });
+            document.getElementById('setupStatus').innerHTML = '<div class="alert alert-success">' + res.message + '</div>';
+            if (type === 'room') { document.getElementById('roomName').value = ''; document.getElementById('roomFloor').value = '0'; }
+            if (type === 'door') document.getElementById('doorName').value = '';
+            if (type === 'pet') { document.getElementById('petName').value = ''; document.getElementById('goToDashboardBtn').classList.remove('hidden'); }
+            setTimeout(function() { document.getElementById('setupStatus').innerHTML = ''; }, 3000);
+        } catch (err) { alert(err.message); }
+    }
+
+    async function fetchPetStats() {
+        if (!currentHomeId) return;
+        try {
+            const petStats = await apiCall('/dt/' + currentHomeId + '/pet/statistics');
+            renderPetStats(petStats.data);
+        } catch (err) { console.error("Error fetching pet stats:", err); }
+    }
+
+    function renderPetStats(data) {
+        if (!data || !data.pet) return;
+        const pet = data.pet;
+        document.getElementById('petNameDisplay').innerText = pet.pet_name;
+        document.getElementById('petCurrentRoom').innerText = pet.current_room || 'Outside';
+        
+        const buzzerSpan = document.getElementById('buzzerStatus');
+        if (pet.is_buzzer_active_now) {
+            buzzerSpan.innerText = "Buzzer ON - ALARM!";
+            buzzerSpan.className = "badge bg-danger fs-6 buzzer-active";
+        } else {
+            buzzerSpan.innerText = "Buzzer OFF";
+            buzzerSpan.className = "badge bg-success fs-6";
+        }
+    }
+
+    async function deleteAccount() {
+        if(!confirm('Are you absolutely sure? This will permanently delete your account and ALL your homes.')) return;
+        const userId = localStorage.getItem('petTrackUserId');
+        if(!userId) return alert('User ID not found.');
+        
+        try {
+            await apiCall('/users/' + userId, 'DELETE');
+            alert('Account deleted successfully.');
+            logout(); 
+        } catch(err) {
+            alert("Error deleting account: " + err.message);
+        }
+    }
+
+    async function openRoomCharts() {
+        try {
+            const res = await apiCall('/dt/' + currentHomeId + '/statistics');
+            const rooms = res.data.rooms;
+            const labels = rooms.map(r => r.room_name);
+            const entries = rooms.map(r => r.pet_entries_count);
+            const durations = rooms.map(r => r.daily_stay_duration_mins);
+
+            if (roomChart1) roomChart1.destroy();
+            if (roomChart2) roomChart2.destroy();
+
+            roomChart1 = new Chart(document.getElementById('chartRoomEntries'), {
+                type: 'bar',
+                data: { labels: labels, datasets: [{ label: 'Daily Entries', data: entries, backgroundColor: 'rgba(13, 110, 253, 0.6)' }] },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+
+            roomChart2 = new Chart(document.getElementById('chartRoomDuration'), {
+                type: 'bar',
+                data: { labels: labels, datasets: [{ label: 'Occupancy Time (min)', data: durations, backgroundColor: 'rgba(25, 135, 84, 0.6)' }] },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+
+            new bootstrap.Modal(document.getElementById('roomChartsModal')).show();
+        } catch (err) { alert("Error loading room charts: " + err.message); }
+    }
+
+    async function openPetCharts() {
+        try {
+            const res = await apiCall('/dt/' + currentHomeId + '/pet/statistics');
+            const pet = res.data.pet;
+            
+            const stats = pet.daily_buzzer_stats || []; 
+            const dataPoints = stats.length > 0 ? stats : [{ date: new Date().toISOString(), auto_violations_count: pet.auto_violations_count, auto_duration_mins: pet.auto_duration_mins }];
+            
+            const labels = dataPoints.map(s => new Date(s.date).toLocaleDateString('en-US', { day: '2-digit', month: '2-digit' }));
+            const violations = dataPoints.map(s => s.auto_violations_count || 0);
+            const avgTime = dataPoints.map(s => (s.auto_violations_count > 0 && s.auto_duration_mins > 0) ? (s.auto_duration_mins / s.auto_violations_count).toFixed(2) : 0);
+
+            if (petChart1) petChart1.destroy();
+            if (petChart2) petChart2.destroy();
+
+            petChart1 = new Chart(document.getElementById('chartPetViolations'), {
+                type: 'line',
+                data: { labels: labels, datasets: [{ label: 'Forbidden Room Entries', data: violations, borderColor: 'rgba(220, 53, 69, 1)', backgroundColor: 'rgba(220, 53, 69, 0.2)', fill: true, tension: 0.3 }] },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+
+            petChart2 = new Chart(document.getElementById('chartPetAvgTime'), {
+                type: 'line',
+                data: { labels: labels, datasets: [{ label: 'Average Buzzer Time (min)', data: avgTime, borderColor: 'rgba(255, 193, 7, 1)', backgroundColor: 'rgba(255, 193, 7, 0.2)', fill: true, tension: 0.3 }] },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+
+            new bootstrap.Modal(document.getElementById('petChartsModal')).show();
+        } catch (err) { alert("Error loading pet charts: " + err.message); }
+    }
+
+    async function fetchManagementData() {
+        try {
+            const res = await apiCall('/dt/' + currentHomeId + '/management', 'GET');
+            const d = res.data;
+            renderMgmtList('mgmtRooms', d.rooms, 'room');
+            renderMgmtList('mgmtDoors', d.doors, 'door');
+            renderMgmtList('mgmtPets', d.pets, 'pet');
+            renderMgmtViewers(d.viewers);
+        } catch(err) { alert("Error loading management data: " + err.message); showDashboard(); }
+    }
+
+    function renderMgmtList(elementId, items, type) {
+        const ul = document.getElementById(elementId);
+        ul.innerHTML = '';
+        if(items.length === 0) return ul.innerHTML = '<li class="list-group-item text-muted small">No items</li>';
+        items.forEach(function(item) {
+            let extra = item.permission ? '<span class="badge bg-' + (item.permission === 'forbidden' ? 'danger' : 'success') + ' ms-2">' + item.permission + '</span>' : '';
+            
+            let idHtml = '';
+            if (type === 'room') {
+                idHtml = `
+                    <div class="mt-1">
+                        <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="toggleIdVisibility('room-id-${item.id}', this)">Show ID</button>
+                        <span id="room-id-${item.id}" class="hidden text-muted text-monospace small ms-2">${item.id}</span>
+                    </div>
+                `;
+            }
+            
+            ul.innerHTML += `
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <span class="d-flex flex-column">
+                        <span>${item.name} ${extra}</span>
+                        ${idHtml}
+                    </span>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteReplicaMgmt('${type}', '${item.id}')"><i class="bi bi-trash"></i></button>
+                </li>
+            `;
+        });
+    }
+
+    function renderMgmtViewers(viewers) {
+        const ul = document.getElementById('mgmtViewers');
+        ul.innerHTML = '';
+        if(viewers.length === 0) return ul.innerHTML = '<li class="list-group-item text-muted small">No viewers</li>';
+        viewers.forEach(function(v) {
+            ul.innerHTML += `
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <span>${v.username}</span>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteViewerMgmt('${v.id}')"><i class="bi bi-trash"></i></button>
+                </li>
+            `;
+        });
+    }
+
+    async function addReplicaMgmt(type) {
+        let name, body = {};
+        if(type === 'room') { name = document.getElementById('mgmtRoomName').value; body = { name: name, floor: parseInt(document.getElementById('mgmtRoomFloor').value) || 0, permission_level: document.getElementById('mgmtRoomPerm').value }; }
+        else if(type === 'door') { name = document.getElementById('mgmtDoorName').value; body = { name: name }; }
+        else if(type === 'pet') { name = document.getElementById('mgmtPetName').value; body = { name: name }; }
+        if(!name) return alert('Please enter a name');
+        try { await apiCall('/dr/' + currentHomeId + '/replicas/' + type, 'POST', body); fetchManagementData(); } catch(err) { alert(err.message); }
+    }
+
+    async function deleteReplicaMgmt(type, id) {
+        if(!confirm('Delete this item?')) return;
+        try { await apiCall('/dr/' + currentHomeId + '/replicas/' + type + '/' + id, 'DELETE'); fetchManagementData(); } catch(err) { alert(err.message); }
+    }
+
+    async function addViewerMgmt() {
+        const username = document.getElementById('mgmtViewerUsername').value;
+        if(!username) return alert('Please enter a username');
+        try { await apiCall('/dt/' + currentHomeId + '/viewers', 'POST', { viewer_username: username }); document.getElementById('mgmtViewerUsername').value = ''; fetchManagementData(); } catch(err) { alert(err.message); }
+    }
+
+    async function deleteViewerMgmt(viewerId) {
+        if(!confirm('Remove this viewer?')) return;
+        try { await apiCall('/dt/' + currentHomeId + '/viewers/' + viewerId, 'DELETE'); fetchManagementData(); } catch(err) { alert(err.message); }
+    }
+</script>
+</body>
+</html>
