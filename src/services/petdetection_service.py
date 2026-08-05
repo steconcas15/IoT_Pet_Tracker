@@ -5,6 +5,7 @@ from bson import ObjectId
 import os
 from flask import current_app
 from datetime import datetime, timezone
+from bot.notifier import send_unauthorized_room_alert
 
 class PetDetectionService(BaseService):
     """
@@ -160,7 +161,7 @@ class PetDetectionService(BaseService):
 
 
     def _trigger_alarms(self, room_name: str, db_service, pet_id: str):
-        """Controlla i permessi della stanza e invia gli eventuali allarmi MQTT."""
+        """Controlla i permessi della stanza e invia gli eventuali allarmi MQTT e notifiche Telegram."""
         rooms = db_service.query_drs("room", {"profile.name": room_name})
         if not rooms:
             return
@@ -176,12 +177,20 @@ class PetDetectionService(BaseService):
                     "data.last_buzzer_start_time": datetime.now(timezone.utc)
                 })
                 
+            # 1. Attivazione Buzzer via MQTT
             if hasattr(current_app, 'mqtt_manager'):
                 try:
                     current_app.mqtt_manager.client.publish("casa/sound", "ON")
                     print(f"  -> 🚨 ALLARME: Il pet è in una stanza vietata ({room_name})! Attivazione buzzer.")
                 except Exception as e:
                     print(f"  -> [MQTT] Errore: {e}")
+
+            # 2. Invio notifica istantanea su Telegram
+            try:
+                send_unauthorized_room_alert(room_name)
+                print(f"  -> 📲 TELEGRAM: Notifica di intrusione inviata per la stanza {room_name}.")
+            except Exception as e:
+                print(f"  -> [TELEGRAM] Errore invio notifica: {e}")
 
         # Gestione spegnimento allarme (OFF)
         elif permission_level == "allowed":
