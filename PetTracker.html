@@ -441,7 +441,8 @@
 
     async function generateOtp() {
         try {
-            const res = await apiCall('/auth/otp/generate', 'POST');
+            // Aggiornato il percorso API
+            const res = await apiCall('/auth/otp', 'POST');
             document.getElementById('otpGenerateBtn').classList.add('hidden');
             document.getElementById('otpInputArea').classList.remove('hidden');
             document.getElementById('otpError').className = 'text-success small mt-2';
@@ -456,7 +457,8 @@
         const code = document.getElementById('otpCodeInput').value;
         if (!code) return alert('Please enter the code');
         try {
-            await apiCall('/auth/otp/verify', 'POST', { otp_code: code });
+            // Aggiornato il percorso API
+            await apiCall('/auth/otp/checks', 'POST', { otp_code: code });
             bootstrap.Modal.getInstance(document.getElementById('otpModal')).hide();
             
             if (pendingOtpAction.type === 'profile') showProfileActual();
@@ -675,12 +677,10 @@
         if (!data || !data.pet) return;
         const pet = data.pet;
         
-        // Leggiamo DIRETTAMENTE i campi della DR del Pet
         document.getElementById('petNameDisplay').innerText = pet.pet_name;
         document.getElementById('petCurrentRoom').innerText = pet.current_room || 'Outside';
         
         const buzzerSpan = document.getElementById('buzzerStatus');
-        // Leggiamo DIRETTAMENTE buzzer_status
         if (pet.buzzer_status === "ON") {
             buzzerSpan.innerText = "Buzzer ON - ALARM!";
             buzzerSpan.className = "badge bg-danger fs-6 buzzer-active";

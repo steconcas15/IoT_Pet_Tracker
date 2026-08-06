@@ -874,7 +874,7 @@ def delete_user(user_id):
         }), 500
 
 
-@auth_api.route('/otp/generate', methods=['POST', 'OPTIONS'])
+@auth_api.route('/otp', methods=['POST', 'OPTIONS'])
 @jwt_required(optional=True) # Mettiamo optional=True per evitare che il blocco OPTIONS fallisca
 def generate_otp():
     """Genera un OTP e lo invia direttamente su Telegram all'utente loggato"""
@@ -921,7 +921,7 @@ def generate_otp():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@auth_api.route('/otp/verify', methods=['POST', 'OPTIONS'])
+@auth_api.route('/otp/checks', methods=['POST', 'OPTIONS'])
 @jwt_required(optional=True)
 def verify_otp():
     """Verifica il codice OTP inviato dall'utente via web"""
