@@ -12,7 +12,9 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # Import datetime for handling timestamps
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timezone, timedelta
+from bot.notifier import send_otp_to_telegram
 
 # Import ObjectId for handling MongoDB document identifiers
 from bson import ObjectId
@@ -670,6 +672,7 @@ def get_pet_statistics(dt_id):
                     "pet_id": replica.get("id"),
                     "pet_name": pet_name,
                     "current_room": pet_data.get("current_room", ""),
+                    "buzzer_status": pet_data.get("buzzer_status", ""),
                     "is_buzzer_active_now": bool(last_buzzer_start),
                     "daily_buzzer_stats": daily_buzzer_stats  # Restituiamo tutto l'array
                 }
@@ -870,7 +873,111 @@ def delete_user(user_id):
             'message': f'Errore durante l\'eliminazione dell\'account: {str(e)}'
         }), 500
 
-    
+
+@auth_api.route('/otp/generate', methods=['POST', 'OPTIONS'])
+@jwt_required(optional=True) # Mettiamo optional=True per evitare che il blocco OPTIONS fallisca
+def generate_otp():
+    """Genera un OTP e lo invia direttamente su Telegram all'utente loggato"""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        current_user_id = get_jwt_identity()
+        if not current_user_id:
+            return jsonify({'error': 'Token mancante o non valido.'}), 401
+
+        db_service = current_app.config['DB_SERVICE']
+        
+        # Genera OTP a 6 cifre
+        otp_code = str(random.randint(100000, 999999))
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        
+        # Salva l'OTP e resetta lo stato di verifica nel database
+        db_service.update_dr(
+            dr_type='user',
+            dr_id=current_user_id,
+            update_data={
+                "data.otp_code": otp_code,
+                "data.otp_expires_at": expires_at.isoformat(),
+                "data.otp_verified": False
+            }
+        )
+        
+        # Invia il messaggio su Telegram
+        sent = send_otp_to_telegram(current_user_id, otp_code)
+        
+        if not sent:
+            return jsonify({
+                'status': 'error', 
+                'message': 'Impossibile inviare l\'OTP su Telegram. Assicurati di aver fatto il /login sul bot.'
+            }), 400
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Codice OTP inviato con successo sul tuo Telegram!'
+        }), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@auth_api.route('/otp/verify', methods=['POST', 'OPTIONS'])
+@jwt_required(optional=True)
+def verify_otp():
+    """Verifica il codice OTP inviato dall'utente via web"""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        current_user_id = get_jwt_identity()
+        if not current_user_id:
+            return jsonify({'error': 'Token mancante o non valido.'}), 401
+
+        data = request.get_json()
+        if not data or 'otp_code' not in data:
+            return jsonify({'error': 'Codice OTP mancante.'}), 400
+
+        user_otp = str(data['otp_code']).strip()
+        db_service = current_app.config['DB_SERVICE']
+
+        # Recupera i dati dell'utente dal DB
+        user = db_service.get_user_by_id(current_user_id)
+        if not user:
+            return jsonify({'error': 'Utente non trovato.'}), 404
+
+        user_data = user.get('data', {})
+        saved_otp = user_data.get('otp_code')
+        expires_at_str = user_data.get('otp_expires_at')
+
+        # Controlla se esiste un OTP attivo e se corrisponde
+        if not saved_otp or saved_otp != user_otp:
+            return jsonify({'error': 'Codice OTP non valido.'}), 400
+
+        # Verifica la scadenza (5 minuti)
+        if expires_at_str:
+            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) > expires_at:
+                return jsonify({'error': 'Codice OTP scaduto. Generane uno nuovo.'}), 400
+
+        # OTP corretto: puliamo l'OTP dal DB per sicurezza e segniamo l'ok
+        db_service.update_dr(
+            dr_type='user',
+            dr_id=current_user_id,
+            update_data={
+                "data.otp_code": None,
+                "data.otp_expires_at": None,
+                "data.otp_verified": True
+            }
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': 'OTP verificato con successo.'
+        }), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+            
 # ==============================================================================
 #                       BLUEPRINTS REGISTRATION UTILITY
 # ==============================================================================
