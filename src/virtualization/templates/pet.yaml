@@ -18,6 +18,9 @@ schemas:
 
   validations:
     type_constraints:
+      buzzer_status:
+        type: str
+        enum: ["ONLINE", "OFFLINE", "UNKNOWN"]
       last_buzzer_start_time:                # <-- NUOVO VINCOLO
         type: datetime
       daily_buzzer_stats:

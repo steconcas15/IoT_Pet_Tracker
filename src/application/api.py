@@ -568,7 +568,15 @@ def get_home_statistics(dt_id):
                     elif isinstance(last_entry_time, datetime) and last_entry_time.tzinfo is None:
                         last_entry_time = last_entry_time.replace(tzinfo=timezone.utc)
                         
-                    time_diff = datetime.now(timezone.utc) - last_entry_time
+                    now = datetime.now(timezone.utc)
+                    
+                    # Taglio alla mezzanotte se l'ingresso è del giorno prima
+                    if last_entry_time.date() < now.date():
+                        start_time_for_calc = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    else:
+                        start_time_for_calc = last_entry_time
+                        
+                    time_diff = now - start_time_for_calc
                     current_session_mins = time_diff.total_seconds() / 60.0
                 
                 total_duration = today_stats.get("daily_stay_duration_mins", 0.0) + current_session_mins
@@ -589,7 +597,7 @@ def get_home_statistics(dt_id):
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Errore nel recupero statistiche: {str(e)}'}), 500
-    
+        
 
 @dt_api.route('/<dt_id>/pet/statistics', methods=['GET'])
 @jwt_required()

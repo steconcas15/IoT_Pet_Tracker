@@ -4,7 +4,7 @@ from src.services.room_statistics_service import RoomStatisticsService
 from bson import ObjectId
 import os
 from flask import current_app
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from bot.notifier import send_unauthorized_room_alert
 
 class PetDetectionService(BaseService):
@@ -100,47 +100,55 @@ class PetDetectionService(BaseService):
     # -------------------------------------------------------------------------
 
     def _handle_pet_exit(self, room_name: str, db_service):
-            """Gestisce l'uscita da una stanza: calcola il tempo e aggiorna le statistiche."""
-            rooms = db_service.query_drs("room", {"profile.name": room_name})
-            if not rooms:
-                return
+        """Gestisce l'uscita da una stanza: calcola il tempo e aggiorna le statistiche."""
+        rooms = db_service.query_drs("room", {"profile.name": room_name})
+        if not rooms:
+            return
+            
+        room_data = rooms[0]
+        room_id = room_data["_id"]
+        current_status = room_data.get("data", {}).get("status", "empty")
+
+        if current_status == "occupied":
+            last_entry_time = room_data.get("data", {}).get("last_entry_time")
+            duration_minutes = 0.0
+
+            # Calcolo dei minuti passati dall'ingresso
+            if last_entry_time:
+                # 1. Se arriva come stringa, la parsiamo assegnando il fuso orario
+                if isinstance(last_entry_time, str):
+                    last_entry_time = datetime.fromisoformat(last_entry_time.replace("Z", "+00:00"))
+                # 2. Se arriva come datetime da MongoDB (naive), forziamo il fuso orario UTC
+                elif isinstance(last_entry_time, datetime) and last_entry_time.tzinfo is None:
+                    last_entry_time = last_entry_time.replace(tzinfo=timezone.utc)
+
+                now = datetime.now(timezone.utc)
                 
-            room_data = rooms[0]
-            room_id = room_data["_id"]
-            current_status = room_data.get("data", {}).get("status", "empty")
+                # 3. Taglio alla mezzanotte se l'ingresso è del giorno precedente
+                if last_entry_time.date() < now.date():
+                    start_time_for_calc = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                else:
+                    start_time_for_calc = last_entry_time
 
-            if current_status == "occupied":
-                last_entry_time = room_data.get("data", {}).get("last_entry_time")
-                duration_minutes = 0.0
+                # Ora calcoliamo la differenza dal momento corretto
+                time_diff = now - start_time_for_calc
+                duration_minutes = time_diff.total_seconds() / 60.0
 
-                # Calcolo dei minuti passati dall'ingresso
-                if last_entry_time:
-                    # 1. Se arriva come stringa, la parsiamo assegnando il fuso orario
-                    if isinstance(last_entry_time, str):
-                        last_entry_time = datetime.fromisoformat(last_entry_time.replace("Z", "+00:00"))
-                    # 2. FIX: Se arriva come datetime da MongoDB (naive), forziamo il fuso orario UTC
-                    elif isinstance(last_entry_time, datetime) and last_entry_time.tzinfo is None:
-                        last_entry_time = last_entry_time.replace(tzinfo=timezone.utc)
+            # 1. Invochiamo il servizio statistiche per sommare la permanenza
+            stats_service = RoomStatisticsService()
+            stats_service.execute({
+                "db_service": db_service,
+                "room_id": str(room_id),
+                "duration_minutes": duration_minutes,
+                "entries_to_add": 1
+            })
 
-                    # Ora entrambe le date sono "offset-aware" e la sottrazione funzionerà
-                    time_diff = datetime.now(timezone.utc) - last_entry_time
-                    duration_minutes = time_diff.total_seconds() / 60.0
-
-                # 1. Invochiamo il servizio statistiche per sommare la permanenza
-                stats_service = RoomStatisticsService()
-                stats_service.execute({
-                    "db_service": db_service,
-                    "room_id": str(room_id),
-                    "duration_minutes": duration_minutes,
-                    "entries_to_add": 1
-                })
-
-                # 2. Resettiamo lo stato della stanza e puliamo il timer
-                db_service.update_dr("room", str(room_id), {
-                    "data.status": "empty",
-                    "data.last_entry_time": None
-                })
-                print(f"  -> DB Stanza: '{room_name}' liberata. Statistiche aggiornate ({duration_minutes:.2f} min).")
+            # 2. Resettiamo lo stato della stanza e puliamo il timer
+            db_service.update_dr("room", str(room_id), {
+                "data.status": "empty",
+                "data.last_entry_time": None
+            })
+            print(f"  -> DB Stanza: '{room_name}' liberata. Statistiche aggiornate ({duration_minutes:.2f} min).")
 
 
     def _handle_pet_entry(self, room_name: str, db_service):
