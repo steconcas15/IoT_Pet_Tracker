@@ -20,8 +20,9 @@ const char *password = "88888888";
 // ===========================
 // Identificativi Digital Twin
 // ===========================
-const char* home_id = "6a6b0e2a73e73970ad552f46";
-const char* room_name = "cucina"; 
+const char* home_id = "6a6b0e2a73e73970ad552f46"; 
+const char* room_id = "6b1a6338-746b-4a8f-a99c-7cbf09bd595b"; // NUOVO: Necessario per l'URL RESTful
+const char* room_name = "cucina"; // Mantenuto per il login e per MQTT
 
 // ===========================
 // Configurazione MQTT (HiveMQ Cloud Privato)
@@ -31,24 +32,23 @@ const int   mqtt_port = 8883; // Porta sicura
 const char* mqtt_user = "PetTracker";
 const char* mqtt_password = "PetTracker26";
 
-String topic_lwt_stato = String("casa/") + room_name + "/camera_stato";
+String topic_lwt_stato = String("casa/") + room_name + "/stato"; 
 const char* mqtt_topic_trigger = "casa/porta_u1"; // Ascolta il sensore ultrasuoni
 
 // ===========================
 // Configurazione Server HTTP (Backend Flask Locale)
 // ===========================
-const char* server_ip = "10.101.219.100";
-const int server_port = 5000;
-const char* server_path = "/api/dr/rooms/telemetry";
-const char* server_auth_path = "/api/dr/rooms/auth";
+const char* server_ip = "10.101.219.100"; 
+const int server_port = 5000; 
+const char* server_auth_path = "/api/dr/devices/tokens"; // AGGIORNATO: Nessun verbo
 
 // ===========================
 // Variabili Globali
 // ===========================
 WiFiClientSecure espClient; // Usato per MQTT Criptato
-PubSubClient mqttClient(espClient);
+PubSubClient mqttClient(espClient); 
 
-unsigned long ultimoTentativoMQTT = 0;
+unsigned long ultimoTentativoMQTT = 0; 
 String jwt_token = ""; // Conterrà il token ottenuto dinamicamente
 
 // Dichiarazioni funzioni
@@ -191,11 +191,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void takeAndSendPhoto() {
-  camera_fb_t * fb = NULL;
+  camera_fb_t * fb = NULL; 
   sensor_t * s = esp_camera_sensor_get(); 
 
   // --- LOGICA FLASH AUTOMATICO ---
-  int aec_value = s->status.aec_value;
+  int aec_value = s->status.aec_value; 
   Serial.printf("Valore esposizione attuale (AEC): %d\n", aec_value);
   bool need_flash = (aec_value > 800); 
 
@@ -223,14 +223,13 @@ void takeAndSendPhoto() {
   // --- COMPOSIZIONE MULTIPART/FORM-DATA TRAMITE TCP GREZZO ---
   if (WiFi.status() == WL_CONNECTED) {
     String boundary = "----ESP32Boundary" + String(millis());
-    String jsonPayload = "{\"home_id\":\"" + String(home_id) + "\", \"room_name\":\"" + String(room_name) + "\"}";
+    
+    // AGGIORNATO: URL dinamico che rispetta la gerarchia REST: /api/dr/<dt_id>/rooms/<room_id>/telemetry
+    String current_server_path = String("/api/dr/") + home_id + "/rooms/" + room_id + "/telemetry";
     
     // Costruzione delle intestazioni del body
+    // AGGIORNATO: Rimosso il payload JSON, passiamo solo l'immagine poiché gli ID sono nell'URL
     String bodyHead = "--" + boundary + "\r\n";
-    bodyHead += "Content-Disposition: form-data; name=\"data\"\r\n";
-    bodyHead += "Content-Type: application/json\r\n\r\n";
-    bodyHead += jsonPayload + "\r\n";
-    bodyHead += "--" + boundary + "\r\n";
     bodyHead += "Content-Disposition: form-data; name=\"image\"; filename=\"photo.jpg\"\r\n";
     bodyHead += "Content-Type: image/jpeg\r\n\r\n";
     
@@ -241,8 +240,8 @@ void takeAndSendPhoto() {
     if (tcpClient.connect(server_ip, server_port)) {
       Serial.println("[HTTP] Inviando pacchetto multipart al server...");
       
-      // Header HTTP
-      tcpClient.print("POST "); tcpClient.print(server_path); tcpClient.println(" HTTP/1.1");
+      // Header HTTP con URL dinamico
+      tcpClient.print("POST "); tcpClient.print(current_server_path); tcpClient.println(" HTTP/1.1");
       tcpClient.print("Host: "); tcpClient.println(server_ip);
       
       // Iniezione dinamica del token ottenuto dal login
@@ -252,7 +251,7 @@ void takeAndSendPhoto() {
       tcpClient.print("Content-Type: multipart/form-data; boundary="); tcpClient.println(boundary);
       tcpClient.println(); // Riga vuota che separa header dal body
       
-      // Invio JSON
+      // Invio Intestazione multipart
       tcpClient.print(bodyHead);
       
       // Invio buffer immagine a blocchi (per evitare sovraccarichi di memoria)
