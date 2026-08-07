@@ -91,6 +91,7 @@ class FlaskServer:
         self.app.mqtt_manager = self.mqtt_manager
         
         mqtt_config = ConfigLoader.load_mqtt_config()
+        mqtt_config = ConfigLoader.load_mqtt_config()
         self.mqtt_manager.start(
             broker=mqtt_config.get("broker"),
             port=mqtt_config.get("port"),

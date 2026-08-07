@@ -1,7 +1,8 @@
 from telegram import Update
-from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, ContextTypes, CommandHandler, MessageHandler, filters
 from bot.handlers.login_handlers import login_handler, logout_handler
 from bot.handlers.pet_handlers import locate_handler, buzzer_handler
+from bot.handlers.login_handlers import home_selection_callback
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Risponde al comando /start"""
@@ -45,3 +46,4 @@ def setup_bot_handlers(application):
     
     # Filtro di fallback (deve restare l'ultimo della lista)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_handler))
+    application.add_handler(CallbackQueryHandler(home_selection_callback, pattern="^select_home_"))

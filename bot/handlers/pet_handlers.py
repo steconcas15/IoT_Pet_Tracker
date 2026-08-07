@@ -10,22 +10,26 @@ async def locate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Devi prima effettuare il /login.")
         return
 
-    user_id = LOGGED_USERS[telegram_id]
+    # Estrazione dell'id utente e della casa selezionata dalla nuova struttura
+    user_data = LOGGED_USERS[telegram_id]
+    user_id = user_data["user_id"]
+    home_id = user_data["home_id"]
+
+    if not home_id:
+        await update.message.reply_text("Non hai nessuna casa selezionata. Effettua nuovamente il /login per sceglierne una.")
+        return
+
     db_service = context.bot_data["db_service"]
     dt_factory = context.bot_data["dt_factory"]
 
     try:
-        user = db_service.get_user_by_id(user_id)
-        owned_homes = user.get("data", {}).get("owned_homes", [])
-        
-        if not owned_homes:
-            await update.message.reply_text("Non hai nessuna casa associata al tuo profilo.")
-            return
-        
-        # Prende la prima casa dell'utente
-        home_id = owned_homes[0]
+        # Usa la casa selezionata durante il login
         dt_data = dt_factory.get_dt(home_id)
         
+        if not dt_data:
+            await update.message.reply_text("Errore: Impossibile trovare la casa selezionata.")
+            return
+            
         # Cerca la replica del pet all'interno della casa
         pet_dr = None
         for replica in dt_data.get("digital_replicas", []):
@@ -47,27 +51,44 @@ async def locate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def buzzer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gestisce il comando /buzzer consentendolo solo se il pet è in una stanza consentita (allowed)"""
+    """Gestisce il comando /buzzer consentendolo solo se il pet è in una stanza consentita (allowed) e l'utente è admin"""
     telegram_id = update.effective_user.id
     if telegram_id not in LOGGED_USERS:
         await update.message.reply_text("⚠️ Devi prima effettuare il /login.")
         return
 
-    user_id = LOGGED_USERS[telegram_id]
+    # Estrazione dell'id utente e della casa selezionata dalla nuova struttura
+    user_data = LOGGED_USERS[telegram_id]
+    user_id = user_data["user_id"]
+    home_id = user_data["home_id"]
+
+    if not home_id:
+        await update.message.reply_text("Non hai nessuna casa selezionata. Effettua nuovamente il /login per sceglierne una.")
+        return
+
     db_service = context.bot_data["db_service"]
     dt_factory = context.bot_data["dt_factory"]
     mqtt_manager = context.bot_data["mqtt_manager"]
 
     try:
+        # BLOCCO DI SICUREZZA: Verifica se l'utente è admin della casa selezionata
         user = db_service.get_user_by_id(user_id)
-        owned_homes = user.get("data", {}).get("owned_homes", [])
-        if not owned_homes:
-            await update.message.reply_text("Non hai nessuna casa associata.")
+        if not user:
+            await update.message.reply_text("Errore: Utente non trovato nel database.")
             return
             
-        home_id = owned_homes[0]
+        owned_homes = user.get("data", {}).get("owned_homes", [])
+        if home_id not in owned_homes:
+            await update.message.reply_text("⛔ Operazione negata: Solo l'amministratore della casa può usare il comando /buzzer.")
+            return
+
+        # Usa direttamente l'home_id della sessione
         dt_data = dt_factory.get_dt(home_id)
         
+        if not dt_data:
+            await update.message.reply_text("Errore: Impossibile trovare la casa selezionata.")
+            return
+
         pet_id = None
         pet_name = "Il tuo pet"
         pet_dr = None
@@ -82,7 +103,7 @@ async def buzzer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
         
         if not pet_dr or not pet_id:
-            await update.message.reply_text("Nessun pet trovato.")
+            await update.message.reply_text("Nessun pet trovato nella casa attuale.")
             return
 
         # 1. Recuperiamo la stanza attuale del pet e verifichiamo i permessi
@@ -127,7 +148,12 @@ async def buzzer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "data.last_buzzer_start_time": datetime.now(timezone.utc).isoformat()
             })
 
-            await update.message.reply_text(f"🔊 **Buzzer azionato** manualmente per {pet_name} in stanza sicura!", parse_mode='Markdown')
+            # Messaggio aggiornato con le istruzioni di spegnimento
+            await update.message.reply_text(
+                f"🔊 **Buzzer azionato** manualmente per {pet_name} in stanza sicura!\n"
+                f"Rifai il comando /buzzer per disattivarlo.", 
+                parse_mode='Markdown'
+            )
 
     except Exception as e:
         await update.message.reply_text(f"Errore durante l'interazione con il buzzer: {str(e)}")

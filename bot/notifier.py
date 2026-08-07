@@ -48,8 +48,8 @@ def send_otp_to_telegram(user_id, otp_code):
 
     # Trova il telegram_id corrispondente al database user_id
     target_chat_id = None
-    for t_id, db_u_id in LOGGED_USERS.items():
-        if str(db_u_id) == str(user_id):
+    for t_id, user_data in LOGGED_USERS.items():
+        if str(user_data["user_id"]) == str(user_id):
             target_chat_id = t_id
             break
 
