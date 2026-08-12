@@ -1,77 +1,79 @@
 #include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h> // Aggiunta la libreria per la connessione sicura TLS
+#include <WiFiClientSecure.h> // Secure TLS connection library
 #include <PubSubClient.h>
 
-//const char *ssid = "FASTWEB-3QH6KF";
-//const char *password = "E2XT6XK6JG";
-const char *ssid = "OnePlus 8";
-const char *password = "88888888";
+// --- WIFI CONFIGURATION ---
+const char *ssid = "FASTWEB-3QH6KF";
+const char *password = "E2XT6XK6JG";
 
-// --- COORDINATE HIVEMQ CLOUD (PRIVATE) ---
+// --- HIVEMQ CLOUD COORDINATES (PRIVATE) ---
 const char* mqtt_server = "f91c2f750c5d4d2c9ff2177772a4ea75.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;
 const char* mqtt_user = "PetTracker";
 const char* mqtt_password = "PetTracker26";
 
-// Topic MQTT
-const char* topic_pub_presenza = "casa/porta_u1";
-const char* topic_lwt_stato    = "casa/porta_u1/stato";
+// --- MQTT TOPICS (Kept in Italian as requested) ---
+const char* topic_pub_presence = "casa/porta_u1";
+const char* topic_lwt_status   = "casa/porta_u1/stato";
 
 #define TRIG_PIN D5 
 #define ECHO_PIN D6
 
-WiFiClientSecure espClient; // Sostituito il vecchio WiFiClient con la versione Secure
+WiFiClientSecure espClient; 
 PubSubClient client(espClient);
 
-long durata;
-int distanza;
+long duration;
+int distance;
 
-// --- VARIABILI PER LA LOGICA ADATTIVA ---
-int distanzaPrecedente = -1;      
-const int SOGLIA_VARIAZIONE = 10; 
+// --- ADAPTIVE LOGIC VARIABLES ---
+int previousDistance = -1;      
+const int VARIATION_THRESHOLD = 10; 
 
-unsigned long ultimoControllo = 0;
-unsigned long ultimoTentativoMQTT = 0;
+// Variable to track if the pet is currently lingering under the door
+bool petUnderDoor = false; 
 
-void connettiWiFi() {
+unsigned long lastCheck = 0;
+unsigned long lastMqttAttempt = 0;
+
+void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
   
-  Serial.print("\nConnessione WiFi a ");
+  Serial.print("\nConnecting to WiFi: ");
   Serial.print(ssid);
   
   WiFi.disconnect(); 
   delay(100);
   WiFi.begin(ssid, password);
   
-  int tentativi = 0;
-  while (WiFi.status() != WL_CONNECTED && tentativi < 20) {
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
-    tentativi++;
+    attempts++;
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi Connesso!");
+    Serial.println("\nWiFi Connected!");
     
-    // FONDAMENTALE PER HIVE MQ CLOUD: 
-    // Dice al microcontrollore di accettare il certificato SSL del server.
+    // REQUIRED FOR HIVE MQ CLOUD: 
+    // Instructs the microcontroller to accept the server's SSL certificate without validation.
     espClient.setInsecure();
   } else {
-    Serial.println("\nTimeout WiFi. Riprovo al prossimo ciclo...");
+    Serial.println("\nWiFi Timeout. Retrying on next cycle...");
   }
 }
 
-void tentaRiconnessioneMQTT() {
-  if (millis() - ultimoTentativoMQTT > 5000) {
-    ultimoTentativoMQTT = millis();
-    Serial.print("Tentativo di connessione NodeMCU a MQTT (TLS)...");
+void attemptMqttReconnection() {
+  if (millis() - lastMqttAttempt > 5000) {
+    lastMqttAttempt = millis();
+    Serial.print("Attempting MQTT (TLS) connection...");
 
-    // Aggiunte le credenziali mqtt_user e mqtt_password alla chiamata connect()
-    if (client.connect("NodeMCU-Ultrasuoni-Client", mqtt_user, mqtt_password, topic_lwt_stato, 1, true, "OFFLINE")) {
-      Serial.println("connesso in sicurezza!");
-      client.publish(topic_lwt_stato, "ONLINE", true);
+    if (client.connect("NodeMCU-Ultrasonic-Client-Door1", mqtt_user, mqtt_password, topic_lwt_status, 1, true, "OFFLINE")) {
+      Serial.println("Securely connected!");
+      // Publish the LWT status as ONLINE with the retained flag set to true
+      client.publish(topic_lwt_status, "ONLINE", true);
     } else {
-      Serial.print("fallito, rc=");
+      Serial.print("Failed, rc=");
       Serial.println(client.state());
     }
   }
@@ -83,54 +85,69 @@ void setup() {
   pinMode(ECHO_PIN, INPUT);
 
   WiFi.mode(WIFI_STA); 
-  connettiWiFi();
+  connectWiFi();
   
-  // Impostata la porta sicura (8883) invece della vecchia 1883
   client.setServer(mqtt_server, mqtt_port);
 }
 
 void loop() {
+  // Check and maintain network connections
   if (WiFi.status() != WL_CONNECTED) {
-    connettiWiFi();
+    connectWiFi();
     return; 
   }
 
   if (!client.connected()) {
-    tentaRiconnessioneMQTT();
+    attemptMqttReconnection();
     return; 
   }
   
   client.loop();
 
-  if (millis() - ultimoControllo > 500) {
-    ultimoControllo = millis();
+  // Sampling frequency: 2 Hz (every 500 ms)
+  if (millis() - lastCheck > 500) {
+    lastCheck = millis();
     
+    // Trigger ultrasonic pulse
     digitalWrite(TRIG_PIN, LOW);
     delayMicroseconds(2);
     digitalWrite(TRIG_PIN, HIGH);
     delayMicroseconds(10);
     digitalWrite(TRIG_PIN, LOW);
     
-    durata = pulseIn(ECHO_PIN, HIGH);
-    distanza = durata * 0.034 / 2;
+    // Read the echo and calculate distance
+    duration = pulseIn(ECHO_PIN, HIGH);
+    distance = duration * 0.034 / 2;
 
-    Serial.printf("Distanza attuale: %d cm | Precedente: %d cm\n", distanza, (distanzaPrecedente == -1 ? 0 : distanzaPrecedente));
+    Serial.printf("Current Distance: %d cm | Previous: %d cm\n", distance, (previousDistance == -1 ? 0 : previousDistance));
 
-    if (distanza > 0) {
-      if (distanzaPrecedente != -1) {
-        int differenza = distanzaPrecedente - distanza;
+    if (distance > 0) {
+      if (previousDistance != -1) {
+        
+        // Calculate the delta (Positive = distance decreased, Negative = distance increased)
+        int delta = previousDistance - distance;
 
-        if (differenza >= SOGLIA_VARIAZIONE) { 
-          Serial.println("[MQTT] Movimento rilevato! Avviso le Camere...");
-          client.publish(topic_pub_presenza, "ACCENDI_CAMERA");
-          delay(5000); 
-          distanzaPrecedente = -1;
-        } else {
-          distanzaPrecedente = distanza;
+        if (!petUnderDoor && delta >= VARIATION_THRESHOLD) { 
+          // POSITIVE DELTA: Pet entered the sensor range
+          petUnderDoor = true;
+          Serial.println("[STATUS] Positive Delta: Pet entered the door frame. Waiting for exit...");
+        } 
+        else if (petUnderDoor && delta <= -VARIATION_THRESHOLD) {
+          // NEGATIVE DELTA: Pet left the sensor range (distance increased back to normal)
+          petUnderDoor = false;
+          Serial.println("[STATUS] Negative Delta: Pet successfully crossed! Sending MQTT trigger...");
+          
+          // Publish the trigger with the RETAINED flag set to true to ensure delivery
+          client.publish(topic_pub_presence, "TURN_ON_CAMERA", true);
         }
-      } else {
-        distanzaPrecedente = distanza;
+        else if (petUnderDoor && abs(delta) < VARIATION_THRESHOLD) {
+          // LINGERING: Pet is standing still under the door (distance hasn't changed much)
+          Serial.println("[STATUS] Pet is lingering under the door. No trigger sent yet.");
+        }
       }
+      
+      // Save current reading for the next cycle comparison
+      previousDistance = distance;
     }
   }
 }
