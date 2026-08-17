@@ -1,3 +1,14 @@
+"""
+Database Management Service Module
+==================================
+This module provides a robust abstraction layer over PyMongo, managing all 
+CRUD (Create, Read, Update, Delete) operations within the MongoDB cluster. 
+
+It dynamically resolves collection names and structural validation rules by 
+interfacing with the centralized `SchemaRegistry`, ensuring data integrity 
+for all Digital Replicas and User entities.
+"""
+
 from typing import Dict, List, Optional, Any
 from pymongo import MongoClient
 from datetime import datetime
@@ -5,11 +16,10 @@ from src.virtualization.digital_replica.schema_registry import SchemaRegistry
 from bson import ObjectId
 
 class DatabaseService:
-
     """
-    Service responsible for managing MongoDB connections and handling CRUD operations
-    for Digital Replicas (DRs). It dynamically resolves collections and validation
-    rules using a SchemaRegistry.
+    Service responsible for managing MongoDB lifecycle connections and handling 
+    persistence operations for Digital Replicas (DRs) and Users. It utilizes 
+    a SchemaRegistry for dynamic collection resolution.
     """
 
     # ==============================================================================
@@ -19,23 +29,22 @@ class DatabaseService:
     def __init__(
         self, connection_string: str, db_name: str, schema_registry: SchemaRegistry
     ):
-
         """
-        Initializes the database service.
+        Initializes the database service configuration parameters.
         
-        Integration Note in app.py:
-            This is instantiated in the main workflow using:
-            - connection_string: derived from ConfigLoader.build_connection_string ("mongodb://localhost:27017")
-            - db_name: loaded from db_config["settings"]["name"] ("pet_tracker_db")
-            - schema_registry: the active global registry holding digital replica schemas
+        Integration Note:
+            This instance is provisioned during the main application bootstrap:
+            - connection_string: derived via ConfigLoader (e.g., "mongodb://localhost:27017")
+            - db_name: targeting the specific logical database (e.g., "pet_tracker_db")
+            - schema_registry: the injected dependency holding replica schemas
         """
-        
         self.connection_string = connection_string
         self.db_name = db_name
         self.schema_registry = schema_registry
-        # Active PyMongo client (assigned upon calling connect())
+        
+        # Active PyMongo client instance (instantiated upon connect())
         self.client = None
-        # Target MongoDB database reference
+        # Target MongoDB database reference pointer
         self.db = None
 
     # ==============================================================================
@@ -43,20 +52,24 @@ class DatabaseService:
     # ==============================================================================
     def connect(self) -> None:
         """
-        Establishes an active connection to the MongoDB cluster.
+        Initializes the connection pool to the MongoDB cluster using the provided URI.
+        
+        Raises:
+            ConnectionError: If the client fails to authenticate or reach the host.
         """
         try:
             self.client = MongoClient(self.connection_string)
             self.db = self.client[self.db_name]
         except Exception as e:
-            raise ConnectionError(f"Failed to connect to MongoDB: {str(e)}")
+            raise ConnectionError(f"Failed to establish connection to MongoDB: {str(e)}")
 
     # ==============================================================================
     # 3. TERMINATE CONNECTION
     # ==============================================================================            
     def disconnect(self) -> None:
         """
-        Safely closes the active MongoDB connection and resets the state.
+        Gracefully terminates the active MongoDB connection and nullifies the state,
+        preventing memory leaks or dangling sockets during application shutdown.
         """
         if self.client:
             self.client.close()
@@ -68,7 +81,10 @@ class DatabaseService:
     # ==============================================================================
     def is_connected(self) -> bool:
         """
-        Checks whether both client and database connections are ready.
+        Evaluates whether the client and database references are actively populated.
+        
+        Returns:
+            bool: True if connected, False otherwise.
         """
         return self.client is not None and self.db is not None
 
@@ -77,79 +93,71 @@ class DatabaseService:
     # ==============================================================================
     def save_dr(self, dr_type: str, dr_data: Dict) -> str:
         """
-        Saves a new Digital Replica to its designated MongoDB collection.
+        Persists a newly instantiated Digital Replica into its designated collection.
 
-        The target collection name is dynamically fetched from the SchemaRegistry 
-        based on the replica type.
+        The target collection name is dynamically resolved through the SchemaRegistry 
+        based on the replica classification (dr_type).
         """
         if not self.is_connected():
-            raise ConnectionError("Not connected to MongoDB")
+            raise ConnectionError("Not connected to MongoDB.")
 
         try:
             # =====================================================================
-            # 1 - It goes to the `src/virtualization/templates/replica.yaml` file,
-            # extracts the replica name from the `type` field (`id`), and returns 
-            # `replicaName_collection` (e.g., `room_collection`).
+            # 1. Navigates to the schema definition (e.g., `replica.yaml`),
+            # extracts the identifier from the `type` field, and generates 
+            # the target collection name (e.g., `room_collection`).
             # =====================================================================
             collection_name = self.schema_registry.get_collection_name(dr_type)
             
             # =====================================================================
-            # 2 - Retrieves the Mongo structure of the replica from the `schemas{}` 
-            # list, and returns an error if it is not found. 
+            # 2. Retrieves the structural schema. If the replica type is not 
+            # registered within `schemas{}`, an exception is thrown.
             # =====================================================================
             validation_schema = self.schema_registry.get_validation_schema(dr_type)
 
-            # Dynamically select the correct collection (e.g., self.db["room_collection"])
+            # Dynamically attach to the correct MongoDB collection
             collection = self.db[collection_name]
 
-            # Insert the compiled replica data (Python dict) and return its unique ID
+            # Execute the document insertion and return the generated primary key
             result = collection.insert_one(dr_data)
             return str(dr_data["_id"])
         except Exception as e:
-            raise Exception(f"Failed to save Digital Replica: {str(e)}")
+            raise Exception(f"Failed to persist Digital Replica: {str(e)}")
 
     # ==============================================================================
     # 6. READ: GET BY UNIQUE ID
     # ==============================================================================
     def get_dr(self, dr_type: str, dr_id: str) -> Optional[Dict]:
         """
-        Retrieves a single Digital Replica document using its unique identifier (_id).
+        Retrieves a singular Digital Replica document utilizing its unique primary key (_id).
         """
-        
         if not self.is_connected():
-            raise ConnectionError("Not connected to MongoDB")
+            raise ConnectionError("Not connected to MongoDB.")
 
         try:
-            # =====================================================================
-            # 1 - It goes to the `src/virtualization/templates/replica.yaml` file,
-            # extracts the replica name from the `type` field (`id`), and returns 
-            # `replicaName_collection` (e.g., `room_collection`).
-            # =====================================================================
+            # Dynamically resolve the corresponding collection string
             collection_name = self.schema_registry.get_collection_name(dr_type)
 
-            # Retrieve the replica using the collection name and its _id filed
+            # Execute a point-query utilizing the primary key index
             return self.db[collection_name].find_one({"_id": dr_id})
         except Exception as e:
-            raise Exception(f"Failed to get Digital Replica: {str(e)}")
+            raise Exception(f"Failed to fetch Digital Replica: {str(e)}")
 
     # ==============================================================================
     # 7. READ: QUERY MULTIPLE REPLICAS
     # ==============================================================================
     def query_drs(self, dr_type: str, query: Dict = None) -> List[Dict]:
         """
-        Queries the database for Digital Replicas of a specific type.
-        Returns a list of documents matching the search filter criteria.
+        Executes an arbitrary search query against a specific Digital Replica collection.
+        Returns a populated array of matching document dictionaries.
         """
         if not self.is_connected():
-            raise ConnectionError("Not connected to MongoDB")
+            raise ConnectionError("Not connected to MongoDB.")
 
         try:
-            # =====================================================================
-            # 1 - It goes to the `src/virtualization/templates/replica.yaml` file,
-            # extracts the replica name from the `type` field (`id`), and returns 
-            # `replicaName_collection` (e.g., `room_collection`).
-            # =====================================================================
+            # Resolve collection routing mapping
             collection_name = self.schema_registry.get_collection_name(dr_type)
+            # Evaluate the query (fallback to an empty dict for full collection scan)
             return list(self.db[collection_name].find(query or {}))
         except Exception as e:
             raise Exception(f"Failed to query Digital Replicas: {str(e)}")
@@ -159,28 +167,29 @@ class DatabaseService:
     # ==============================================================================
     def update_dr(self, dr_type: str, dr_id: str, update_data: Dict) -> None:
         """
-        Updates an existing Digital Replica document.
-        Automatically attaches or updates the metadata's 'updated_at' timestamp in UTC.
+        Performs a partial update on an existing Digital Replica document.
+        Automatically intercepts the payload to inject a precise UTC timestamp 
+        reflecting the modification event.
         """
         if not self.is_connected():
-            raise ConnectionError("Not connected to MongoDB")
+            raise ConnectionError("Not connected to MongoDB.")
 
         try:
             collection_name = self.schema_registry.get_collection_name(dr_type)
 
-            # Ensure metadata sub-document exists and update its timestamp
+            # Enforce metadata structure and update the chronological timestamp
             if "metadata" not in update_data:
                 update_data["metadata"] = {}
             update_data["metadata"]["updated_at"] = datetime.utcnow()
 
-            # Execute the partial update using MongoDB's $set operator
+            # Execute the partial update explicitly using the atomic $set operator
             result = self.db[collection_name].update_one(
                 {"_id": dr_id}, {"$set": update_data}
             )
 
-            # Raise an error if no document matched the target identifier
+            # Validate that the target identifier actually exists in the database
             if result.matched_count == 0:
-                raise ValueError(f"Digital Replica not found: {dr_id}")
+                raise ValueError(f"Target Digital Replica not found: {dr_id}")
 
         except Exception as e:
             raise Exception(f"Failed to update Digital Replica: {str(e)}")
@@ -190,49 +199,57 @@ class DatabaseService:
     # ==============================================================================
     def delete_dr(self, dr_type: str, dr_id: str) -> None:
         """
-        Deletes a single Digital Replica document using its unique identifier.
+        Permanently eliminates a singular Digital Replica document from the database.
         """
         if not self.is_connected():
-            raise ConnectionError("Not connected to MongoDB")
+            raise ConnectionError("Not connected to MongoDB.")
 
         try:
             collection_name = self.schema_registry.get_collection_name(dr_type)
             result = self.db[collection_name].delete_one({"_id": dr_id})
 
-            # Confirm a document was actually deleted
+            # Confirm physical deletion occurred
             if result.deleted_count == 0:
-                raise ValueError(f"Digital Replica not found: {dr_id}")
+                raise ValueError(f"Target Digital Replica not found: {dr_id}")
         except Exception as e:
             raise Exception(f"Failed to delete Digital Replica: {str(e)}")
 
 
     # ==============================================================================
-    # 10. VERIFICA RUOLI (ADMIN / VIEWER)
+    # 10. ROLE VERIFICATION (ADMIN / VIEWER)
     # ==============================================================================
     def is_home_admin(self, dt_id: str, user_id: str) -> bool:
-        """Verifica se l'ID della casa è nell'array owned_homes dell'utente."""
+        """
+        Verifies if a specific Home Environment ID exists within a user's 'owned_homes' array, 
+        thereby confirming administrative ownership privileges.
+        """
         try:
             collection_name = self.schema_registry.get_collection_name("user")
+            
+            # Cast to ObjectId for native MongoDB comparison if applicable
             valid_id = ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id
             
-            # Cerca l'utente che ha questo ID e che possiede questa specifica casa
+            # Query the user document matching the ID and possessing the target home
             user = self.db[collection_name].find_one({
                 "_id": valid_id,
                 "data.owned_homes": dt_id
             })
             return user is not None
         except Exception as e:
-            raise Exception(f"Errore durante la verifica dei permessi admin: {str(e)}")
+            raise Exception(f"Error during administrative permission validation: {str(e)}")
 
     # ==============================================================================
-    # 12. GESTIONE CASE IN VISUALIZZAZIONE (VIEWABLE HOMES)
+    # 12. VIEWABLE HOMES MANAGEMENT
     # ==============================================================================
     def add_viewable_home(self, user_id: str, dt_id: str) -> None:
-        """Aggiunge una casa alle viewable_homes dell'utente (Ruolo Viewer)."""
+        """
+        Grants viewer (read-only) access by appending a Home ID to the user's 'viewable_homes' set.
+        """
         try:
             collection_name = self.schema_registry.get_collection_name("user")
             valid_id = ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id
             
+            # Use $addToSet to prevent duplicate authorizations
             result = self.db[collection_name].update_one(
                 {"_id": valid_id},
                 {
@@ -241,17 +258,19 @@ class DatabaseService:
                 }
             )
             if result.matched_count == 0:
-                raise ValueError("Utente non trovato.")
+                raise ValueError("Target user not found.")
         except Exception as e:
-            raise Exception(f"Errore nell'aggiunta del viewer: {str(e)}")
+            raise Exception(f"Error executing viewer authorization: {str(e)}")
 
     def remove_viewable_home(self, user_id: str, dt_id: str) -> None:
-        """Rimuove una casa dalle viewable_homes dell'utente."""
+        """
+        Revokes viewer access by removing a Home ID from the user's 'viewable_homes' array.
+        """
         try:
             collection_name = self.schema_registry.get_collection_name("user")
             valid_id = ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id
             
-            # $pull rimuove l'elemento dall'array
+            # The $pull operator selectively removes the element from the specified array
             result = self.db[collection_name].update_one(
                 {"_id": valid_id},
                 {
@@ -260,21 +279,25 @@ class DatabaseService:
                 }
             )
             if result.modified_count == 0:
-                raise ValueError("Viewer non trovato o casa non associata.")
+                raise ValueError("Viewer not found or home environment is not currently associated.")
         except ValueError as ve:
             raise ve
         except Exception as e:
-            raise Exception(f"Errore nella rimozione del viewer: {str(e)}")
+            raise Exception(f"Error revoking viewer access: {str(e)}")
 
     # ==============================================================================
-    # 13. RIMOZIONE GLOBALE CASA (CASCADE DELETE)
+    # 13. GLOBAL HOME REMOVAL (CASCADE DELETE)
     # ==============================================================================
     def remove_home_from_all_users(self, dt_id: str) -> None:
-        """Quando una casa viene eliminata, la rimuove dagli array di TUTTI gli utenti."""
+        """
+        Executes a global cleanup when a Home Environment is annihilated. 
+        Iterates over ALL user documents and forcefully strips the target ID 
+        from both ownership and viewership arrays.
+        """
         try:
             collection_name = self.schema_registry.get_collection_name("user")
             
-            # Aggiorna tutti i documenti togliendo l'ID da entrambi gli array
+            # Update all documents asynchronously by executing a widespread array modification
             self.db[collection_name].update_many(
                 {}, 
                 {
@@ -285,48 +308,49 @@ class DatabaseService:
                 }
             )
         except Exception as e:
-            raise Exception(f"Errore nella pulizia globale della casa: {str(e)}") 
+            raise Exception(f"Error during global environment cleanup cascade: {str(e)}") 
 
                
-    # # ==============================================================================
+    # ==============================================================================
     # 14. IDENTITY & USER MANAGEMENT
     # ==============================================================================
     
     def _init_users_collection(self) -> None:
         """
-        Assicura che la collezione 'user_collection' esista e che l'username sia univoco.
+        Validates the initialization of the 'user_collection' and ensures 
+        cryptographic indexing constraints (e.g., unique username enforcement).
         """
         try:
-            # Recupera dinamicamente il nome della collezione usando lo SchemaRegistry
+            # Dynamically retrieve the specific collection name mapping via the SchemaRegistry
             collection_name = self.schema_registry.get_collection_name("user")
             
             if collection_name not in self.db.list_collection_names():
                 self.db.create_collection(collection_name)
                 
-            # L'indice univoco ora deve puntare a 'profile.username' secondo user.yaml
+            # The unique index constraint is directed strictly at 'profile.username' as defined in user.yaml
             self.db[collection_name].create_index("profile.username", unique=True)
         except Exception as e:
-            print(f"[WARNING] Errore nell'inizializzazione della collezione utenti: {str(e)}")
+            print(f"[WARNING] Error during the initialization of the users collection: {str(e)}")
 
     def get_user_by_username(self, username: str) -> Optional[Dict]:
         """
-        Recupera i dati di un utente tramite il suo username (usato per Login e aggiunta Viewer).
+        Retrieves user document data strictly via their registered username.
+        Primarily utilized during authentication layers and granting Viewer permissions.
         """
         try:
             collection_name = self.schema_registry.get_collection_name("user")
-            # Aggiornato per cercare l'username all'interno dell'oggetto profile
+            # Query updated to traverse the nested 'profile' object structure
             return self.db[collection_name].find_one({"profile.username": username})
         except Exception as e:
-            raise Exception(f"Errore nel recupero dell'utente: {str(e)}")
+            raise Exception(f"Error querying user by username: {str(e)}")
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:
         """
-        Recupera un utente tramite il suo ID univoco MongoDB.
+        Retrieves a user document utilizing their unique MongoDB BSON ID.
         """
         try:
             collection_name = self.schema_registry.get_collection_name("user")
             valid_id = ObjectId(user_id) if ObjectId.is_valid(user_id) else user_id
             return self.db[collection_name].find_one({"_id": valid_id})
         except Exception as e:
-            raise Exception(f"Errore nel recupero dell'utente: {str(e)}")
-        
+            raise Exception(f"Error querying user by unique ID: {str(e)}")

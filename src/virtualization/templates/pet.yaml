@@ -3,17 +3,17 @@ schemas:
     _id: str
     type: str
     profile:
-      name: str        # Pet name
-      species: str     # Pet species
+      name: str
+      species: str
     metadata:
-      created_at: datetime    # Creation timestamp
-      updated_at: datetime    # Last update timestamp
+      created_at: datetime
+      updated_at: datetime
       
   entity:
     data:
       current_room: str
       buzzer_status: str
-      last_buzzer_start_time: datetime       # <-- NUOVO CAMPO PER IL TIMER
+      last_buzzer_start_time: datetime
       daily_buzzer_stats: List[Dict]
 
   validations:
@@ -21,7 +21,7 @@ schemas:
       buzzer_status:
         type: str
         enum: ["ONLINE", "OFFLINE", "UNKNOWN"]
-      last_buzzer_start_time:                # <-- NUOVO VINCOLO
+      last_buzzer_start_time:
         type: datetime
       daily_buzzer_stats:
         type: List[Dict]
@@ -34,11 +34,11 @@ schemas:
           type_mappings:
             date: datetime
             auto_violations_count: int
-            auto_duration_mins: float        # <-- CORRETTO DA "floats" A "float"
+            auto_duration_mins: float
             
     initialization:
       data:
         current_room: ""
         buzzer_status: "UNKNOWN"
-        last_buzzer_start_time: null         # <-- INIZIALIZZAZIONE VUOTA
+        last_buzzer_start_time: null
         daily_buzzer_stats: []

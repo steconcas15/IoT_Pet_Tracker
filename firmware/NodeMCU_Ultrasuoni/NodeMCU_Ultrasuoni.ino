@@ -1,10 +1,13 @@
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h> // Secure TLS connection library
-#include <PubSubClient.h>
+#include <MQTT.h>             // Replaced PubSubClient to support QoS 1 publishing
 
 // --- WIFI CONFIGURATION ---
 const char *ssid = "FASTWEB-3QH6KF";
 const char *password = "E2XT6XK6JG";
+
+// --- DIGITAL TWIN IDENTIFIERS ---
+const char* door_id = "7d0b2bd9-8320-4337-a0c0-f8aedc9f118c";
 
 // --- HIVEMQ CLOUD COORDINATES (PRIVATE) ---
 const char* mqtt_server = "f91c2f750c5d4d2c9ff2177772a4ea75.s1.eu.hivemq.cloud";
@@ -12,15 +15,16 @@ const int mqtt_port = 8883;
 const char* mqtt_user = "PetTracker";
 const char* mqtt_password = "PetTracker26";
 
-// --- MQTT TOPICS (Kept in Italian as requested) ---
-const char* topic_pub_presence = "casa/porta_u1";
-const char* topic_lwt_status   = "casa/porta_u1/stato";
+// --- MQTT TOPICS ---
+// Dynamically built using the unique door_id
+String topic_pub_presence = String("home/") + door_id;
+String topic_lwt_status   = String("home/") + door_id + "/state";
 
 #define TRIG_PIN D5 
 #define ECHO_PIN D6
 
 WiFiClientSecure espClient; 
-PubSubClient client(espClient);
+MQTTClient mqttClient(256); // Buffer size for MQTT payloads
 
 long duration;
 int distance;
@@ -68,13 +72,17 @@ void attemptMqttReconnection() {
     lastMqttAttempt = millis();
     Serial.print("Attempting MQTT (TLS) connection...");
 
-    if (client.connect("NodeMCU-Ultrasonic-Client-Door1", mqtt_user, mqtt_password, topic_lwt_status, 1, true, "OFFLINE")) {
+    // Setup Last Will and Testament (LWT) BEFORE connecting
+    // QoS = 1, Retained = true
+    mqttClient.setWill(topic_lwt_status.c_str(), "OFFLINE", true, 1);
+
+    if (mqttClient.connect("NodeMCU-Ultrasonic-Client-Door1", mqtt_user, mqtt_password)) {
       Serial.println("Securely connected!");
-      // Publish the LWT status as ONLINE with the retained flag set to true
-      client.publish(topic_lwt_status, "ONLINE", true);
+      // Publish the LWT status as ONLINE with the retained flag set to true and QoS 1
+      mqttClient.publish(topic_lwt_status.c_str(), "ONLINE", true, 1);
     } else {
-      Serial.print("Failed, rc=");
-      Serial.println(client.state());
+      Serial.print("Failed, return code=");
+      Serial.println(mqttClient.returnCode());
     }
   }
 }
@@ -87,7 +95,7 @@ void setup() {
   WiFi.mode(WIFI_STA); 
   connectWiFi();
   
-  client.setServer(mqtt_server, mqtt_port);
+  mqttClient.begin(mqtt_server, mqtt_port, espClient);
 }
 
 void loop() {
@@ -97,12 +105,12 @@ void loop() {
     return; 
   }
 
-  if (!client.connected()) {
+  if (!mqttClient.connected()) {
     attemptMqttReconnection();
     return; 
   }
   
-  client.loop();
+  mqttClient.loop();
 
   // Sampling frequency: 2 Hz (every 500 ms)
   if (millis() - lastCheck > 500) {
@@ -137,8 +145,8 @@ void loop() {
           petUnderDoor = false;
           Serial.println("[STATUS] Negative Delta: Pet successfully crossed! Sending MQTT trigger...");
           
-          // Publish the trigger with the RETAINED flag set to true to ensure delivery
-          client.publish(topic_pub_presence, "TURN_ON_CAMERA", true);
+          // Publish the trigger with the RETAINED flag set to true and QoS 1 to ensure delivery
+          mqttClient.publish(topic_pub_presence.c_str(), "TURN_ON_CAMERA", false, 1);
         }
         else if (petUnderDoor && abs(delta) < VARIATION_THRESHOLD) {
           // LINGERING: Pet is standing still under the door (distance hasn't changed much)

@@ -6,7 +6,7 @@ schemas:
       name: str
       description: str
       floor: int
-      permission_level: str   # <-- Spostato qui
+      permission_level: str
     metadata:
       created_at: datetime
       updated_at: datetime
@@ -25,7 +25,7 @@ schemas:
       profile:
         - name
         - floor
-        - permission_level    # <-- Spostato qui
+        - permission_level
       metadata:
         - created_at
         - updated_at

@@ -1,11 +1,20 @@
+"""
+Digital Twin Core Orchestration Module
+======================================
+This module defines the fundamental `DigitalTwin` class, which serves as the 
+central in-memory representation of a physical environment. It implements an 
+orchestration layer that maps abstract Digital Replicas (DRs) to active 
+computational services, facilitating data processing and simulation routing.
+"""
+
 # ==============================================================================
 # SYSTEM & THIRD-PARTY IMPORTS
 # ==============================================================================
-# Dict, List, Optional: Standard typing utilities used for explicit Python type hinting
+# Standard typing utilities utilized for explicit Python type hinting and static analysis
 from typing import Dict, List, Type, Any
-# Import the BaseService template so this new service can inherit from it
+# Import the BaseService interface to ensure polymorphic service execution
 from src.services.base import BaseService
-# datetime: Used to generate accurate UTC timestamps for creation and update metadata
+# Used to generate accurate UTC timestamps for temporal operations and metadata
 from datetime import datetime
 
 # ==============================================================================
@@ -13,21 +22,25 @@ from datetime import datetime
 # ==============================================================================
 class DigitalTwin:
     """
-    Core Digital Twin (DT) management class.
-    Acts as the central coordinator, mapping digital replicas (DRs)
-    to active services that process their data.
+    Core Digital Twin (DT) management architecture.
+    Acts as the central execution coordinator, aggregating discrete Digital Replicas (DRs)
+    and mapping them to specialized computational services for data processing, 
+    telemetry analysis, and state mutation.
     """
 
     # ==========================================================================
     # METHOD: __init__
     # ==========================================================================
     def __init__(self):
-
-        # List holding all Digital Replicas registered in this Twin
+        """
+        Initializes the stateful attributes of the Digital Twin instance.
+        Allocates memory structures for replica storage and service routing.
+        """
+        # Array structure holding all instantiated Digital Replicas registered within this Twin context
         self.digital_replicas: List = []
 
-        # Dictionary mapping active service names to their instances
-        # E.g., {"anomaly_detection": AnomalyDetectionService()}
+        # Hash map linking active service nominal identifiers to their concrete executing instances
+        # Example mapping: {"anomaly_detection": AnomalyDetectionService()}
         self.active_services: Dict = {}
 
     # ==========================================================================
@@ -35,38 +48,41 @@ class DigitalTwin:
     # ==========================================================================
     def add_digital_replica(self, dr_instance: Any) -> None:
         """
-        Adds a new Digital Replica (DR) to the Digital Twin.
+        Integrates a new Digital Replica (DR) entity into the encompassing Digital Twin ecosystem.
         
-        :param dr_instance: The replica instance to add (object or dict).
+        Args:
+            dr_instance (Any): The initialized replica instance (object or dictionary) 
+                               representing a physical counterpart (e.g., room, pet, sensor).
         """
         self.digital_replicas.append(dr_instance)
 
     # ==========================================================================
     # METHOD: add_service
     # ==========================================================================
-    def add_service(self, service):
+    def add_service(self, service: Any) -> None:
         """
-        Registers and activates a service within the Digital Twin.
-        Accepts either an already instantiated service or the class itself.
+        Registers and provisions a computational service within the Digital Twin environment.
+        Employs dynamic instantiation if a class reference is provided rather than an object.
         
-        :param service: Service instance or service class reference.
+        Args:
+            service (Any): A pre-instantiated service object or an uninstantiated service class reference.
         """
+        # Implement dynamic reflection: instantiate the service if passed as a strict type
         if isinstance(service, type):
-            # If a class is passed (e.g., MyService) instead of an instance,
-            # we instantiate it dynamically here.
             service = service()
 
-        # Register the service using its 'name' attribute as the unique key
+        # Map the active instance into the routing dictionary utilizing its intrinsic 'name' property
         self.active_services[service.name] = service
 
     # ==========================================================================
     # METHOD: list_services
     # ==========================================================================
-    def list_services(self):
+    def list_services(self) -> List[str]:
         """
-        Returns a list of names of all services currently active in the DT.
+        Retrieves the registry of all computational services currently bound to this instance.
         
-        :return: List of service name strings.
+        Returns:
+            List[str]: An array comprising the nominal string identifiers of active services.
         """
         return list(self.active_services.keys())
 
@@ -75,106 +91,56 @@ class DigitalTwin:
     # ==========================================================================
     def remove_service(self, service_name: str) -> None:
         """
-        Removes (deactivates) an active service from the Digital Twin by name.
+        Gracefully unbinds and deactivates a specific service from the Digital Twin architecture.
         
-        :param service_name: The name of the service to remove.
+        Args:
+            service_name (str): The specific string identifier of the targeted service.
         """
+        # Safe deletion utilizing dictionary membership validation
         if service_name in self.active_services:
             del self.active_services[service_name]
 
     # ==========================================================================
     # METHOD: get_dt_data
     # ==========================================================================
-    def get_dt_data(self):
+    def get_dt_data(self) -> Dict[str, List]:
         """
-        Retrieves the data of the Digital Twin, including all its DRs.
+        Compiles and exports the composite state data of the Digital Twin, 
+        encapsulating all registered child Digital Replicas.
         
-        :return: A dictionary containing the list of digital replicas.
+        Returns:
+            Dict[str, List]: A structured payload containing the current digital replicas array.
         """
         return {"digital_replicas": self.digital_replicas}
 
     # ==========================================================================
     # METHOD: execute_service
     # ==========================================================================
-    def execute_service(self, service_name: str, **kwargs):
+    def execute_service(self, service_name: str, **kwargs) -> Any:
         """
-        Executes a specific service by passing all registered DRs
-        along with any additional custom parameters.
+        Triggers the polymorphic execution of a specific registered service. 
+        Automatically injects the standard Digital Twin structural payload alongside 
+        any arbitrary keyword arguments required for the specific algorithmic task.
         
-        :param service_name: Name of the registered service to run.
-        :param kwargs: Additional parameters required by the service's 'execute' method.
-        :raises ValueError: If the requested service is not registered.
+        Args:
+            service_name (str): The specific string identifier of the service to invoke.
+            **kwargs: Variable keyword arguments utilized for dynamic parameter injection.
+            
+        Returns:
+            Any: The resulting output computed by the targeted service logic.
+            
+        Raises:
+            ValueError: If the requested service identifier is absent from the active registry.
         """
+        # Enforce strict routing: abort if the targeted service is not provisioned
         if service_name not in self.active_services:
-            raise ValueError(f"Service {service_name} not found")
+            raise ValueError(f"Execution failed: Service '{service_name}' is not registered in the active context.")
 
+        # Retrieve the functional service instance
         service = self.active_services[service_name]
 
-        # Prepare the standard data payload containing all DRs
+        # Construct the standardized baseline telemetry/state payload encompassing all replicas
         data = {"digital_replicas": self.digital_replicas}
 
-        # Execute the service with the payload and unpacked arguments
+        # Dispatch the payload and any unpacked dynamic arguments to the service engine
         return service.execute(data, **kwargs)
-
-    # def execute_service_on_dr(self, service_name: str, dr: Any) -> Any:
-    #     """
-    #     Esegue un servizio sui dati di una DR
-    #     """
-    #     if dr not in self.digital_replicas:
-    #         raise ValueError("This DR is not part of this Digital Twin")
-
-    #     data = dr["data"]  # Assumiamo che la DR abbia un attributo data
-    #     return self.execute_service(service_name, data)
-
-    # def get_digital_replicas_by_type(self, dr_type: str):
-    #     """Get all digital replicas of a specific type"""
-    #     return [dr for dr in self.digital_replicas if dr['type'] == dr_type]
-
-    # def print_replicas(self):
-    #     """Print detailed information about all Digital Replicas"""
-    #     print("\n" + "=" * 80)
-    #     print(f"DIGITAL TWIN STATUS - Total Replicas: {len(self.digital_replicas)}")
-    #     print("=" * 80)
-    #
-    #     for idx, dr in enumerate(self.digital_replicas, 1):
-    #         print(f"\n{idx}. DIGITAL REPLICA: {dr['type'].upper()}")
-    #         print("-" * 80)
-    #
-    #         # Print ID and Profile
-    #         print(f"ID: {dr['id']}")
-    #         print("\nPROFILE:")
-    #         for key, value in dr['profile'].items():
-    #             print(f"  {key}: {value}")
-    #
-    #         # Print Metadata
-    #         print("\nMETADATA:")
-    #         for key, value in dr['metadata'].items():
-    #             if isinstance(value, datetime):
-    #                 value = value.strftime("%Y-%m-%d %H:%M:%S")
-    #             print(f"  {key}: {value}")
-    #
-    #         # Print Data
-    #         print("\nDATA:")
-    #         data = dr['data']
-    #         for key, value in data.items():
-    #             if key == 'measurements':
-    #                 print("  measurements:")
-    #                 for m in value:
-    #                     timestamp = m['timestamp']
-    #                     if isinstance(timestamp, datetime):
-    #                         timestamp = timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    #                     print(f"    - type: {m['measure_type']}")
-    #                     print(f"      value: {m['value']}")
-    #                     print(f"      timestamp: {timestamp}")
-    #             elif isinstance(value, dict):
-    #                 print(f"  {key}:")
-    #                 for k, v in value.items():
-    #                     print(f"    {k}: {v}")
-    #             elif isinstance(value, list):
-    #                 print(f"  {key}: {', '.join(map(str, value))}")
-    #             else:
-    #                 print(f"  {key}: {value}")
-    #
-    #         print("-" * 80)
-    #
-    #     print("\n" + "=" * 80 + "\n")

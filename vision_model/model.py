@@ -1,45 +1,62 @@
+"""
+Computer Vision Inference Module
+================================
+This module encapsulates the object detection logic using the YOLO (You Only Look Once) 
+architecture. It is specifically configured to identify target animals (pets) within 
+images submitted via IoT telemetry, leveraging a pre-trained model on the COCO dataset.
+"""
+
 import os
 import cv2
 from ultralytics import YOLO
 
 class PetDetector:
+    """
+    A dedicated detector class that wraps the Ultralytics YOLO inference engine.
+    It isolates the computer vision logic from the main application routing and services.
+    """
 
     def __init__(self):
-        """Initializes the detector with the Large model.
-
-        Using the YOLO11l model for a great balance between 
-        high precision and manageable file size.
         """
-        # 1. Trova il percorso assoluto della cartella in cui si trova QUESTO file
+        Initializes the detector with the Large YOLO model.
+
+        Using the YOLO11l model provides an optimal balance between 
+        high detection precision and manageable computational requirements.
+        """
+        # 1. Locate the absolute path of the directory containing THIS specific file
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # 2. Unisci il percorso della cartella al nome del file del modello
+        # 2. Construct the complete file path to the pre-trained model weights
         model_path = os.path.join(current_dir, "yolov11_model", "yolo11l.pt")
 
-        # 3. Passa il percorso assoluto a YOLO[cite: 2]
-        print(f"[YOLO] Caricamento modello da: {model_path}")
+        # 3. Instantiate the YOLO model using the resolved absolute path
+        print(f"[YOLO] Loading model from: {model_path}")
         self.model = YOLO(model_path)
 
-        # Definiamo una lista di ID corrispondenti ai pet accettati.
-        # 15 = cat, 16 = dog (dataset COCO standard).
-        # Aggiungi qui l'ID del coniglio se usi un modello custom.
+        # Define a target list of class IDs corresponding to accepted pets.
+        # Based on the standard COCO dataset mappings: 15 = cat, 16 = dog.
+        # Note: Additional class IDs (e.g., for a rabbit) can be appended here 
+        # if migrating to a custom-trained model in the future.
         self.pet_classes = [15, 16]
 
     def detect_any_pet(self, image_path: str) -> bool:
-        """Checks if ANY target animal is present in the image.
+        """
+        Evaluates whether ANY targeted animal is present within the provided image.
 
         Arguments:
-            image_path: path to the image file
+            image_path (str): The absolute or relative path to the telemetry image file.
 
         Returns:
-            bool: True if found with conf >= 0.25, False otherwise.
+            bool: True if at least one target pet is found with a confidence threshold >= 0.25, False otherwise.
         """
-        # Filtriamo direttamente a livello YOLO passando l'intera lista di ID pet.
-        # Questo ignora tutti gli altri oggetti (sedie, libri, ecc.)[cite: 2].
+        # Filter detections directly at the YOLO engine level by supplying the list of target pet IDs.
+        # This optimization ensures all non-target objects (e.g., chairs, books, people) are instantly ignored.
         results = self.model(
             image_path, conf=0.25, classes=self.pet_classes, verbose=False
         )
+        
+        # Extract the first result object (since we are only processing a single image)
         result = results[0]
 
-        # Returns True if ANY pet is found, False otherwise[cite: 2]
+        # Return True if the bounding box array contains at least one valid detection
         return len(result.boxes) > 0

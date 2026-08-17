@@ -1,30 +1,43 @@
+"""
+Digital Twin Factory Module
+===========================
+This module implements the Factory Design Pattern to manage the lifecycle of 
+Digital Twin (DT) entities. It handles the instantiation, configuration, and 
+persistence of Digital Twins, acting as an orchestration layer between the 
+in-memory Python objects and the MongoDB database. 
+
+It dynamically binds Digital Replicas (DRs) and computational services to the 
+core Digital Twin architecture.
+"""
+
 # ==============================================================================
 # SYSTEM & THIRD-PARTY IMPORTS
 # ==============================================================================
 
-# Dict, List, Optional: Standard typing utilities used for explicit Python type hinting
+# Standard typing utilities used for explicit Python type hinting to ensure code robustness
 from typing import Dict, List, Optional
-# datetime: Used to generate accurate UTC timestamps for creation and update metadata
+# Used to generate accurate UTC timestamps for document creation and update metadata
 from datetime import datetime
-# ObjectId: MongoDB BSON utility used to generate safe, unique database identifiers
+# MongoDB BSON utility used to generate cryptographically safe, unique database identifiers
 from bson import ObjectId
 
 # ==============================================================================
 # LOCAL PROJECT IMPORTS (APPLICATION MODULES)
 # ==============================================================================
-# DatabaseService: Coordinates raw MongoDB connections and handles direct document queries
+# Coordinates raw MongoDB connections and handles direct document queries
 from src.services.database_service import DatabaseService
-# SchemaRegistry: Manages data schemas and ensures Digital Replicas follow expected structures
+# Manages data schemas and ensures Digital Replicas follow expected YAML/JSON structures
 from src.virtualization.digital_replica.schema_registry import SchemaRegistry
-# DigitalTwin: The core class instantiated in-memory to hold active replicas and services
+# The core class instantiated in-memory to hold active replicas and executing services
 from src.digital_twin.core import DigitalTwin
 
 
 class DTFactory:
     """
     Factory class responsible for creating, configuring, and assembling
-    fully-initialized Digital Twin (DT) instances by pulling and linking 
-    their referenced Digital Replicas (DRs) and Services from the database.
+    fully initialized Digital Twin (DT) instances. It achieves this by pulling 
+    and linking referenced Digital Replicas (DRs) and Services from the database,
+    hydrating them into active in-memory objects.
     """
 
     # ==============================================================================
@@ -32,17 +45,20 @@ class DTFactory:
     # ==============================================================================
     def __init__(self, db_service: DatabaseService, schema_registry: SchemaRegistry):
         """
-        Initializes the factory with database and schema management services.
-        Immediately ensures the required database collections and indexes exist.
-        """
+        Initializes the factory dependency injection with database and schema management services.
+        Immediately enforces database integrity by ensuring required collections and indexes exist.
 
-        # Save reference to the database connection service
+        Args:
+            db_service (DatabaseService): The active database connection manager.
+            schema_registry (SchemaRegistry): The validator for replica structures.
+        """
+        # Persist reference to the database connection service
         self.db_service = db_service
 
-        # Save reference to the schema registry for DR validation
+        # Persist reference to the schema registry for future validation protocols
         self.schema_registry = schema_registry
 
-        # Call internal helper to make sure the MongoDB collection is ready
+        # Execute internal bootstrapping to guarantee MongoDB collection readiness
         self._init_dt_collection()
 
 
@@ -52,32 +68,35 @@ class DTFactory:
 
     def _init_dt_collection(self) -> None:
         """
-        Ensures the 'digital_twins' collection exists in MongoDB.
-        Sets up unique and performance indexes for lookups and queries.
+        Ensures the 'digital_twins' collection exists within the MongoDB cluster.
+        Establishes unique and performance-optimized indexes to accelerate queries.
+        
+        Raises:
+            ConnectionError: If the underlying database client is unreachable.
+            Exception: If collection creation or indexing fails.
         """
-
-        # Halt execution if the database client is not connected
+        # Halt execution gracefully if the database client is disconnected
         if not self.db_service.is_connected():
-            raise ConnectionError("Database service not connected")
+            raise ConnectionError("Database service is currently not connected.")
 
         try:
-            # Retrieve the active database object
+            # Retrieve the active database instance
             db = self.db_service.db
 
-            # Create the 'digital_twins' collection if it does not exist yet
+            # Create the 'digital_twins' collection if it is absent from the registry
             if "digital_twins" not in db.list_collection_names():
                 db.create_collection("digital_twins")
-                # Access the newly created collection
                 dt_collection = db["digital_twins"]
 
-                # Create a unique index on 'name' to prevent duplicate twin records
+                # Enforce a unique index on the 'name' field to prevent twin duplication
                 dt_collection.create_index("name", unique=True)
                 
+                # Create performance indexes on temporal metadata for chronological sorting
                 dt_collection.create_index("metadata.created_at")
                 dt_collection.create_index("metadata.updated_at")
                 
         except Exception as e:
-            raise Exception(f"Failed to initialize DT collection: {str(e)}")
+            raise Exception(f"Failed to initialize Digital Twin collection: {str(e)}")
 
     # ==============================================================================
     # 3. CREATE: NEW DIGITAL TWIN RECORD
@@ -85,42 +104,41 @@ class DTFactory:
     
     def create_dt(self, name: str, description: str = "") -> str:
         """
-        Create a new Digital Twin
+        Provisions a new Digital Twin entity in the database architecture.
 
         Args:
-            name: Name of the Digital Twin
-            description: Optional description
+            name (str): The unique identifier name of the Digital Twin.
+            description (str, optional): A contextual description of the environment. Defaults to "".
 
         Returns:
-            str: ID of the created Digital Twin
+            str: The stringified BSON ObjectId of the newly created Digital Twin.
         """
-
-        # Structure the document payload according to the DB schema
+        # Structure the document payload strictly adhering to the defined database schema
         dt_data = {
-            "_id": str(ObjectId()),                      # Unique ID of the Digital Twin
-            "name": name,                                # Unique name of the DT
-            "description": description,                  # Optional text description
-            "digital_replicas": [],                      # Array of DR references: {"type": ..., "id": ...}
-            "services": [],                              # Array of linked services: {"name": ..., "config": ...}
+            "_id": str(ObjectId()),                      # Unique Primary Key
+            "name": name,                                # Unique nominal identifier
+            "description": description,                  # Contextual text
+            "digital_replicas": [],                      # Array of DR polymorphic references: {"type": ..., "id": ...}
+            "services": [],                              # Array of linked analytical services
             "metadata": {
-                "created_at": datetime.utcnow(),         # Creation timestamp in UTC
-                "updated_at": datetime.utcnow(),         # Last update timestamp in UTC
-                "status": "active",                      # Initial operational status
+                "created_at": datetime.utcnow(),         # Immutable creation timestamp (UTC)
+                "updated_at": datetime.utcnow(),         # Mutable modification timestamp (UTC)
+                "status": "active",                      # Default operational lifecycle state
             },
         }
 
         try:
-            # Get reference to the digital twins collection
+            # Interface with the digital_twins collection
             dt_collection = self.db_service.db["digital_twins"]
 
-            # Insert the structured document into the collection
+            # Persist the structured document into MongoDB
             result = dt_collection.insert_one(dt_data)
 
-            # Return the newly inserted ID converted to string
+            # Return the database-generated ID
             return str(result.inserted_id)
             
         except Exception as e:
-            raise Exception(f"Failed to create Digital Twin: {str(e)}")
+            raise Exception(f"Failed to provision Digital Twin: {str(e)}")
 
     # ==============================================================================
     # 4. ASSOCIATE: ADD DIGITAL REPLICA REFERENCE
@@ -128,32 +146,36 @@ class DTFactory:
     
     def add_digital_replica(self, dt_id: str, dr_type: str, dr_id: str) -> None:
         """
-        Verifies that a Digital Replica exists, then links its reference (type + ID)
-        to the target Digital Twin document.
+        Validates the existence of a Digital Replica (DR) and establishes a bidirectional 
+        linkage by injecting its reference into the parent Digital Twin document.
+
+        Args:
+            dt_id (str): The ID of the parent Digital Twin.
+            dr_type (str): The classification of the Replica (e.g., 'room', 'pet').
+            dr_id (str): The unique ID of the Replica.
         """
         try:
-            # Get reference to the collection to perform the update
             dt_collection = self.db_service.db["digital_twins"]
 
-            # Query the DB to ensure the DR actually exists before saving the link
+            # Query the database to guarantee referential integrity before linkage
             dr = self.db_service.get_dr(dr_type, dr_id)
 
-            # If the DR is not found, stop the operation to prevent orphan references
+            # Abort operation if the DR is phantom/nonexistent
             if not dr:
-                raise ValueError(f"Digital Replica not found: {dr_id}")
+                raise ValueError(f"Digital Replica resolution failed for ID: {dr_id}")
 
-            # Perform an atomic document update in MongoDB
+            # Execute an atomic update operation within MongoDB
             dt_collection.update_one(
-                {"_id": dt_id},                 # Filter the specific DT by its ID
+                {"_id": dt_id},                 
                 {
-                    # Push the reference dictionary into the digital_replicas array
+                    # Atomically append the reference dict to the replicas array
                     "$push": {"digital_replicas": {"type": dr_type, "id": dr_id}},
-                    # Update the modification timestamp of the DT to current UTC time
+                    # Synchronize the modification timestamp
                     "$set": {"metadata.updated_at": datetime.utcnow()},
                 },
             )
         except Exception as e:
-            raise Exception(f"Failed to add Digital Replica: {str(e)}")
+            raise Exception(f"Failed to link Digital Replica: {str(e)}")
 
     # ==============================================================================
     # 5. SERVICE MANAGEMENT: REGISTRY MAPPING
@@ -161,11 +183,12 @@ class DTFactory:
     
     def _get_service_module_mapping(self) -> Dict[str, str]:
         """
-        Internal mapping matching Service Class names to their Python import paths.
-        Used to dynamically import services when building a Digital Twin.
+        Provides an internal lookup table mapping abstract Service Class names 
+        to their explicit Python import paths. Crucial for dynamic class loading.
+
+        Returns:
+            Dict[str, str]: A dictionary of available analytical and computational services.
         """
-        
-        # Return the registry mapping of available services in the system
         return {
             "PetDetectionService": "src.services.petdetection_service",
             "RoomStatisticsService": "src.services.room_statistics_service",
@@ -180,89 +203,81 @@ class DTFactory:
         self, dt_id: str, service_name: str, service_config: Dict = None
     ) -> None:
         """
-        Validates, imports, and links an analytics/computational service to a DT.
-        Ensures the service class is importable before saving its metadata.
+        Dynamically validates, imports, and associates a computational service to a DT.
+        Utilizes Python's reflection capabilities to ensure the service is executable 
+        before committing its configuration to the database.
 
         Args:
-            dt_id: Digital Twin ID
-            service_name: Name of the service
-            service_config: Optional service configuration
+            dt_id (str): The target Digital Twin ID.
+            service_name (str): The designated name of the service class.
+            service_config (Dict, optional): Injection parameters for the service.
         """
         try:
-
-            # Retrieve the digital twins collection
             dt_collection = self.db_service.db["digital_twins"]
-
-            # 5. - Get the mapping of registered services
             module_mapping = self._get_service_module_mapping()
 
-            # Abort if the requested service is not registered in the mapping
+            # Prevent injection of unregistered or malicious service requests
             if service_name not in module_mapping:
                 raise ValueError(
-                    f"Service {service_name} not configured in module mapping"
+                    f"Service '{service_name}' is not registered in the system module mapping."
                 )
 
-            # Identify the target Python module containing the service
+            # Resolve the absolute import path
             module_name = module_mapping[service_name]
 
-            # Attempt a hot import to verify the code is clean and executable
+            # Attempt a hot dynamic import to verify compilation and syntax integrity
             try:
-                # Dynamically import the target module
+                # Dynamically load the target module into memory
                 service_module = __import__(module_name, fromlist=[service_name])
 
-                # Extract the specific service class from the imported module
+                # Extract the specified service class definition
                 service_class = getattr(service_module, service_name)
 
-                # Instantiate class to validate the constructor and avoid future runtime crashes
+                # Instantiate the class to validate constructor parameters
                 service = service_class()
 
-                # Build the service metadata package to be saved in the database
+                # Construct the persistent metadata payload
                 service_data = {
-                    "name": service_name,                # Class name of the service
-                    "config": service_config or {},      # Configuration dict (defaults to empty)
-                    "status": "active",                  # Operational status of the service
-                    "added_at": datetime.utcnow(),       # Timestamp when the service was linked
+                    "name": service_name,                
+                    "config": service_config or {},      
+                    "status": "active",                  
+                    "added_at": datetime.utcnow(),       
                 }
 
-                # Save service config reference to the database record
+                # Atomically append the service configuration to the DT document
                 dt_collection.update_one(
-                    {"_id": dt_id},                        # Locate the target DT
+                    {"_id": dt_id},                        
                     {
-                        # Append the service metadata to the services array
                         "$push": {"services": service_data},
-                        # Set the global modification timestamp
                         "$set": {"metadata.updated_at": datetime.utcnow()},
                     },
                 )
             except (ImportError, AttributeError) as e:
                 raise ValueError(
-                    f"Failed to load service {service_name} from module {module_name}: {str(e)}"
+                    f"Failed to dynamically load service '{service_name}' from module '{module_name}': {str(e)}"
                 )
 
         except Exception as e:
-            raise Exception(f"Failed to add service: {str(e)}")
+            raise Exception(f"Failed to associate service: {str(e)}")
 
     # ==============================================================================
     # 7. READ: FETCH DATA BY ID
     # ==============================================================================
     def get_dt(self, dt_id: str) -> Optional[Dict]:
         """
-        Get a Digital Twin by ID
+        Retrieves the raw JSON/Dict representation of a Digital Twin.
 
         Args:
-            dt_id: Digital Twin ID
+            dt_id (str): The unique ID of the Digital Twin.
 
         Returns:
-            Dict: Digital Twin data if found, None otherwise
+            Optional[Dict]: The document dictionary if found, None otherwise.
         """
         try:
-            # Access the target database collection
             dt_collection = self.db_service.db["digital_twins"]
-
-            # Query for an exact match on the '_id' field
             return dt_collection.find_one({"_id": dt_id})
         except Exception as e:
-            raise Exception(f"Failed to get Digital Twin: {str(e)}")
+            raise Exception(f"Failed to retrieve Digital Twin: {str(e)}")
 
     # ==============================================================================
     # 8. READ: LIST ALL DIGITAL TWINS
@@ -270,19 +285,17 @@ class DTFactory:
     
     def list_dts(self) -> List[Dict]:
         """
-        List all Digital Twins
+        Fetches the complete registry of all instantiated Digital Twins.
 
         Returns:
-            List[Dict]: List of Digital Twins
+            List[Dict]: A list containing all Digital Twin documents.
         """
         try:
-            # Access the digital twins collection
             dt_collection = self.db_service.db["digital_twins"]
-
-            # Retrieve all documents (empty find) and convert the MongoDB cursor to a Python list
+            # Convert the MongoDB cursor generator into a static Python list
             return list(dt_collection.find())
         except Exception as e:
-            raise Exception(f"Failed to list Digital Twins: {str(e)}")
+            raise Exception(f"Failed to compile Digital Twin list: {str(e)}")
 
 
     # ==============================================================================
@@ -291,69 +304,67 @@ class DTFactory:
     
     def create_dt_from_data(self, dt_data: dict) -> DigitalTwin:
         """
-        Create a DigitalTwin instance from database data with enhanced debugging
-        """
-        
-        print("\n=== Creating DT Instance ===")
-        try:
-            # Create new DT instance
-            # Step A: Create a fresh instance of our core DigitalTwin class
-            dt = DigitalTwin()
-            print(f"Created new DT instance for {dt_data.get('name', 'unnamed')}")
+        Hydrates a persistent database dictionary into a fully functional, 
+        in-memory DigitalTwin Python object. Reconstructs all Replica bindings 
+        and dynamically instantiates all associated services.
 
-            # Add Digital Replicas
-            # Step B: Retrieve actual DR documents and register them to the live instance
+        Args:
+            dt_data (dict): The raw database document representing the Twin.
+
+        Returns:
+            DigitalTwin: An active, executable representation of the Twin architecture.
+        """
+        print("\n=== Instantiating Digital Twin ===")
+        try:
+            # Step A: Initialize the core algorithmic wrapper
+            dt = DigitalTwin()
+            print(f"[Hydration] Initialized core instance for: {dt_data.get('name', 'Unnamed')}")
+
+            # Step B: Resolve and mount all associated Digital Replicas
             for dr_ref in dt_data.get("digital_replicas", []):
                 dr = self.db_service.get_dr(dr_ref["type"], dr_ref["id"])
                 if dr:
                     dt.add_digital_replica(dr)
-                    print(f"Added DR: {dr_ref['type']} - {dr_ref['id']}")
+                    print(f"[Hydration] Successfully mounted DR: {dr_ref['type']} (ID: {dr_ref['id']})")
 
-            # Add Services
-            # Step C: Dynamically import, configure, and attach runtime services
-            print("\nLoading services...")
+            # Step C: Dynamically reflect, instantiate, and configure linked computational services
+            print("\n[Hydration] Bootstrapping background services...")
             service_mapping = self._get_service_module_mapping()
-            print(f"Service mapping: {service_mapping}")
 
             for service_data in dt_data.get("services", []):
                 service_name = service_data["name"]
-                print(f"\nProcessing service: {service_name}")
+                print(f"[Service Loader] Processing node: {service_name}")
 
                 if service_name in service_mapping:
                     try:
                         module_name = service_mapping[service_name]
-                        print(f"Loading module: {module_name}")
-
-                        service_module = __import__(
-                            module_name, fromlist=[service_name]
-                        )
-                        print(f"Module loaded successfully")
-
+                        
+                        # Reflection: Load the module string
+                        service_module = __import__(module_name, fromlist=[service_name])
+                        
+                        # Reflection: Extract the class type
                         service_class = getattr(service_module, service_name)
-                        print(f"Got service class: {service_class}")
-
+                        
+                        # Reflection: Instantiate the object
                         service = service_class()
-                        print(f"Service instance created")
 
+                        # Inject configuration parameters if the service supports it
                         if hasattr(service, "configure") and "config" in service_data:
                             service.configure(service_data["config"])
-                            print(f"Service configured with: {service_data['config']}")
+                            print(f"[Service Loader] Configuration injected: {service_data['config']}")
 
                         dt.add_service(service)
-                        print(f"Service added to DT")
-                        print(f"Current DT services: {dt.list_services()}")
+                        print(f"[Service Loader] Service '{service_name}' successfully bound to Twin.")
                     except Exception as e:
-                        print(f"Error adding service {service_name}: {str(e)}")
-                        print(f"Exception type: {type(e)}")
+                        print(f"[Service Loader] Fatal error loading '{service_name}': {str(e)}")
                 else:
-                    print(f"Warning: Service {service_name} not found in mapping")
+                    print(f"[Service Loader] Warning: '{service_name}' is orphaned or unregistered.")
 
             return dt
 
         except Exception as e:
-            print(f"Error creating DT: {str(e)}")
-            print(f"Exception type: {type(e)}")
-            raise Exception(f"Failed to create DT from data: {str(e)}")
+            print(f"[Hydration Error] Process terminated: {str(e)}")
+            raise Exception(f"Failed to hydrate DT from persistent data: {str(e)}")
 
     # ==============================================================================
     # 10. ENTRYPOINT: GET INSTANCE BY ID
@@ -361,140 +372,77 @@ class DTFactory:
     
     def get_dt_instance(self, dt_id: str) -> Optional[DigitalTwin]:
         """
-        Get a fully initialized DigitalTwin instance by ID
+        High-level wrapper that fetches raw data and immediately hydrates it 
+        into a functional Python object.
 
         Args:
-            dt_id: Digital Twin ID
+            dt_id (str): The ID of the target Digital Twin.
 
         Returns:
-            Optional[DigitalTwin]: Digital Twin instance if found, None otherwise
+            Optional[DigitalTwin]: The fully assembled instance, or None if missing.
         """
         try:
-            # Get DT data from database
             dt_data = self.get_dt(dt_id)
 
-            # If no document matches the provided ID, return None
             if not dt_data:
                 return None
 
-            # Create and return DT instance
             return self.create_dt_from_data(dt_data)
 
         except Exception as e:
-            raise Exception(f"Failed to get DT instance: {str(e)}")
+            raise Exception(f"Failed to instantiate Digital Twin wrapper: {str(e)}")
 
-
-    # def get_dt_by_name(self, name: str) -> Optional[Dict]:
-    #     """
-    #     Get a Digital Twin by name
-    #
-    #     Args:
-    #         name: Digital Twin name
-    #
-    #     Returns:
-    #         Dict: Digital Twin data if found, None otherwise
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #         return dt_collection.find_one({"name": name})
-    #     except Exception as e:
-    #         raise Exception(f"Failed to get Digital Twin: {str(e)}")
-
-
-    # def update_dt(self, dt_id: str, update_data: Dict) -> None:
-    #     """
-    #     Update a Digital Twin
-    #
-    #     Args:
-    #         dt_id: Digital Twin ID
-    #         update_data: Data to update
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #
-    #         # Ensure metadata.updated_at is set
-    #         if "metadata" not in update_data:
-    #             update_data["metadata"] = {}
-    #         update_data["metadata"]["updated_at"] = datetime.utcnow()
-    #
-    #         result = dt_collection.update_one(
-    #             {"_id": dt_id},
-    #             {"$set": update_data}
-    #         )
-    #
-    #         if result.matched_count == 0:
-    #             raise ValueError(f"Digital Twin not found: {dt_id}")
-    #
-    #     except Exception as e:
-    #         raise Exception(f"Failed to update Digital Twin: {str(e)}")
+    # ==============================================================================
+    # 11. DELETION & CLEANUP
+    # ==============================================================================
 
     def delete_dt(self, dt_id: str) -> None:
         """
-        Delete a Digital Twin
+        Permanently destroys a Digital Twin record from the database architecture.
 
         Args:
-            dt_id: Digital Twin ID
+            dt_id (str): The ID of the Twin to annihilate.
+            
+        Raises:
+            ValueError: If the targeted ID does not exist.
         """
         try:
             dt_collection = self.db_service.db["digital_twins"]
             result = dt_collection.delete_one({"_id": dt_id})
 
             if result.deleted_count == 0:
-                raise ValueError(f"Digital Twin not found: {dt_id}")
+                raise ValueError(f"Deletion failed: Digital Twin ID '{dt_id}' not found.")
 
         except Exception as e:
-            raise Exception(f"Failed to delete Digital Twin: {str(e)}")
+            raise Exception(f"Failed to destroy Digital Twin: {str(e)}")
 
     def remove_digital_replica(self, dt_id: str, dr_id: str) -> None:
         """
-        Remove a Digital Replica reference from a Digital Twin
+        Severs the linkage between a parent Digital Twin and a specific Digital Replica.
+        Executes a targeted atomic pull operation to remove the reference array element.
     
         Args:
-            dt_id: Digital Twin ID
-            dr_id: Digital Replica ID
+            dt_id (str): The Digital Twin ID.
+            dr_id (str): The targeted Digital Replica ID to disconnect.
         """
         try:
             dt_collection = self.db_service.db["digital_twins"]
     
+            # Perform an atomic multi-step update
             dt_collection.update_one(
                 {"_id": dt_id},
                 {
+                    # Safely extract the target dictionary from the array
                     "$pull": {
                         "digital_replicas": {
                             "id": dr_id
                         }
                     },
+                    # Update temporal metadata
                     "$set": {
                         "metadata.updated_at": datetime.utcnow()
                     }
                 }
             )
         except Exception as e:
-            raise Exception(f"Failed to remove Digital Replica: {str(e)}")
-
-    # def remove_service(self, dt_id: str, service_name: str) -> None:
-    #     """
-    #     Remove a service reference from a Digital Twin
-    #
-    #     Args:
-    #         dt_id: Digital Twin ID
-    #         service_name: Name of the service to remove
-    #     """
-    #     try:
-    #         dt_collection = self.db_service.db["digital_twins"]
-    #
-    #         dt_collection.update_one(
-    #             {"_id": dt_id},
-    #             {
-    #                 "$pull": {
-    #                     "services": {
-    #                         "name": service_name
-    #                     }
-    #                 },
-    #                 "$set": {
-    #                     "metadata.updated_at": datetime.utcnow()
-    #                 }
-    #             }
-    #         )
-    #     except Exception as e:
-    #         raise Exception(f"Failed to remove service: {str(e)}")
+            raise Exception(f"Failed to sever Digital Replica link: {str(e)}")

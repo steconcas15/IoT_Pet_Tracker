@@ -1,36 +1,61 @@
+"""
+Abstract Service Interface Module
+=================================
+This module defines the foundational abstract base class (ABC) for all 
+computational and analytical services within the Digital Twin architecture. 
+It enforces a uniform interface (contract) across all concrete service 
+implementations, promoting polymorphism and adherence to the Open/Closed 
+Principle of SOLID software design.
+"""
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
 
 # ==============================================================================
-# ABC means "Abstract Base Class". 
-# This class is just a template/blueprint. You cannot run it directly.
+#                      ABSTRACT BASE CLASS DEFINITION
 # ==============================================================================
 
 class BaseService(ABC):
-    """Base class for all services in the pool"""
+    """
+    Abstract Base Class (ABC) serving as the architectural blueprint for all 
+    functional services in the execution pool. As an abstract entity, it cannot 
+    be instantiated directly; it mandates that all derived concrete subclasses 
+    implement the defined abstract methods.
+    """
 
     def __init__(self):
         """
-        This runs automatically when a new service is created.
-        Automatically get the class name as a string.
-        For example: if the class is called "WeatherService", self.name becomes "WeatherService".
+        Initializes the abstract service state.
+        
+        Employs Python's internal reflection capabilities (`__class__.__name__`) 
+        to automatically extract and assign the concrete subclass's identifier 
+        to the `name` attribute upon instantiation. This facilitates dynamic 
+        service routing and registry management within the core Digital Twin 
+        orchestration layer.
         """
         self.name = self.__class__.__name__
 
     @abstractmethod
     def execute(self, data: Dict, dr_type: str = None, attribute: str = None) -> Any:
         """
-        Every service must implement this method to process its data.
+        Abstract execution contract. Every concrete service inheriting from 
+        BaseService MUST override and implement this method to encapsulate its 
+        specific algorithmic logic for processing telemetry or state data.
 
         Args:
-            data: The main input data (usually a dictionary).
-            dr_type: The type of Digital Replica (optional).
-            attribute: A specific field or property to work on (optional).
+            data (Dict): The primary structural payload (typically containing the 
+                         Digital Replicas state dictionary).
+            dr_type (str, optional): The specific classification of Digital Replica targeted.
+            attribute (str, optional): A targeted property or field for localized processing.
 
         Returns:
-            The final processed data (can be anything).
+            Any: The computed output, mutated state, or analytical result derived 
+                 from the concrete implementation.
+
+        Raises:
+            NotImplementedError: Implicitly raised by the Python ABC meta-class 
+                                 if a subclass fails to override this definition.
         """
-        # "pass" is just a placeholder. It means "do nothing here".
-        # The real code will be written inside the specific services.
+        # Execution logic is strictly deferred to concrete subclasses.
         pass

@@ -1,67 +1,96 @@
+"""
+Schema Registry & Validation Translation Module
+=============================================
+This module acts as the central authoritative registry for structural data schemas 
+within the Digital Twin architecture. It is responsible for ingesting human-readable 
+YAML entity definitions and compiling them into native MongoDB `$jsonSchema` structures, 
+thereby enforcing strict database-level validation and referential integrity.
+"""
+
 from typing import Dict, Any
 import yaml
 
 # ==============================================================================
 # SCHEMA REGISTRY COMPONENT
 # ==============================================================================
-# This class acts as the central translator and storage for data schemas.
-# It reads validation rules from YAML files and converts them into MongoDB's
-# native $jsonSchema format.
-# ==============================================================================
 
 class SchemaRegistry:
+    """
+    A registry singleton-like class designed to parse, translate, and cache 
+    validation schemas. It bridges the gap between application-level YAML 
+    configurations and MongoDB's BSON validation engine.
+    """
+
     def __init__(self):
         """
-        [CONSTRUCTOR]
-        Initializes an empty dictionary to hold all processed schemas,
-        indexed by their type.
+        Initializes the schema registry context.
+        Allocates an empty dictionary to hold all compiled MongoDB schemas, 
+        indexed by their respective Digital Replica type strings.
         """
         self.schemas = {}
 
     # --------------------------------------------------------------------------
-    # YAML LOADING & PROCESSING
+    # YAML PARSING & COMPILATION PIPELINE
     # --------------------------------------------------------------------------
     
     def load_schema(self, schema_type: str, yaml_path: str) -> None:
-        """Load schema from YAML file"""
+        """
+        Loads a schema definition from a local YAML file and triggers its 
+        compilation into a MongoDB-compatible JSON schema.
+
+        Args:
+            schema_type (str): The classification identifier for the schema (e.g., 'room', 'pet').
+            yaml_path (str): The absolute or relative file path to the YAML definition.
+
+        Raises:
+            ValueError: If the file is inaccessible, improperly formatted, or missing the 'schemas' root node.
+        """
         try:
-            # Opens the specified YAML file in read-only mode ("r")
+            # Open the designated YAML file in read-only mode to prevent accidental mutations
             with open(yaml_path, "r") as file:
-                # Safely parses the raw YAML content into a standard Python dictionary
+                # Safely parse the raw YAML syntax into a navigable Python dictionary
                 raw_schema = yaml.safe_load(file)
 
-            # Sanity check: ensures the file isn't empty and contains the root "schemas" key
+            # Structural sanity check: verify the existence of the expected root namespace
             if not raw_schema or "schemas" not in raw_schema:
-                raise ValueError(f"Invalid schema structure in {yaml_path}")
+                raise ValueError(f"Invalid schema structure detected in {yaml_path}")
 
             # ┌────────────────────────────────────────────────────────────────┐
             # │                     CONVERSION PIPELINE                        │
             # ├────────────────────────────────────────────────────────────────┤
-            # │ Extracts the "schemas" block from the YAML and passes it to    │
-            # │ the internal conversion engine to map out the MongoDB format.  │
+            # │ Isolate the "schemas" block from the YAML structure and pass   │
+            # │ it to the internal translation engine for BSON mapping.        │
             # └────────────────────────────────────────────────────────────────┘
             validation_schema = self._convert_yaml_to_mongodb_schema(
                 raw_schema["schemas"]
             )
 
-            # Cache the fully compiled MongoDB schema using the type as the key
+            # Persist the fully compiled MongoDB schema into the memory cache
             self.schemas[schema_type] = validation_schema
 
         except Exception as e:
-            # Catch-all for missing files, syntax issues, or corrupted YAMLs
+            # Global exception handler for file I/O errors and parsing failures
             raise ValueError(f"Failed to load schema from {yaml_path}: {str(e)}")
 
     # --------------------------------------------------------------------------
-    # CONVERSION ENGINE (YAML -> MONGOdb)
+    # TRANSLATION ENGINE (YAML -> MONGODB BSON)
     # --------------------------------------------------------------------------
     def _convert_yaml_to_mongodb_schema(self, yaml_schema: Dict) -> Dict:
-        """Convert YAML schema format to MongoDB $jsonSchema format"""
+        """
+        Translates abstract YAML schema definitions into strict MongoDB `$jsonSchema` formats.
+
+        Args:
+            yaml_schema (Dict): The isolated schema dictionary parsed from YAML.
+
+        Returns:
+            Dict: A structured dictionary compliant with MongoDB validation rules.
+        """
 
         def convert_type(yaml_type: str) -> str:
-            """Convert YAML type to MongoDB BSON type"""
-
-            # Maps human-readable YAML data types to their strict MongoDB BSON equivalents
-            
+            """
+            Internal helper mapping human-readable YAML data types to their 
+            strict MongoDB BSON type equivalents.
+            """
             type_mapping = {
                 "str": "string",
                 "int": "int",
@@ -70,74 +99,78 @@ class SchemaRegistry:
                 "datetime": "date",
                 "Dict": "object",
                 "List": "array",
-                "List[Dict]": "array",  # <-- CORREZIONE: Supporto per List[Dict] richiesto dal README
+                # PATCH: Explicit mapping for List[Dict] to satisfy complex nested array requirements
+                "List[Dict]": "array",  
                 "List[str]": "array",
             }
-            # Returns the matched BSON type, or falls back to the original string if not found
+            # Return the corresponding BSON type, or fallback to the raw string if unregistered
             return type_mapping.get(yaml_type, yaml_type)
 
         def process_field(field_def):
-            """Process a field definition from YAML to MongoDB format"""
-
-            # Case 1: Simple string type definition (e.g., "str") -> Build a basic BSON type rule
+            """
+            Recursively processes a nested field definition to ensure deep 
+            structural compliance with BSON types.
+            """
+            # Case 1: Terminal string definition (e.g., "str") -> Construct a basic BSON type constraint
             if isinstance(field_def, str):
                 return {"bsonType": convert_type(field_def)}
 
-            # Case 2: Nested dictionary (sub-object) -> Recursively process its internal properties
+            # Case 2: Nested dictionary (Object) -> Recursively traverse and map internal properties
             elif isinstance(field_def, dict):
                 return {
                     "bsonType": "object",
                     "properties": {k: process_field(v) for k, v in field_def.items()},
                 }
 
-            # Case 3: Raw list definition -> Explicitly set it as an array type constraint
+            # Case 3: Raw list definition -> Enforce standard array constraint
             elif isinstance(field_def, list):
                 return {"bsonType": "array"}
+            
             return field_def
 
         # --------------------------------------------------------------------------
-        # BUILDING SCHEMA PROPERTIES
+        # SCHEMA PROPERTY ASSEMBLY
         # --------------------------------------------------------------------------
         
         properties = {}
 
-        # If the YAML defines common_fields shared by everyone (e.g., shared metadata), process them here
+        # Process standard attributes shared universally across Digital Replicas (e.g., metadata)
         if "common_fields" in yaml_schema:
             for field_name, field_def in yaml_schema["common_fields"].items():
                 properties[field_name] = process_field(field_def)
 
-        # If specific digital twin entity payload fields exist inside "data", nest them under the "data" object
+        # Process domain-specific state parameters defined within the 'entity' block
         if "entity" in yaml_schema and "data" in yaml_schema["entity"]:
             properties["data"] = process_field(yaml_schema["entity"]["data"])
 
         # --------------------------------------------------------------------------
-        # VALIDATIONS & MANDATORY FIELDS INJECTION
+        # VALIDATION RULES & MANDATORY FIELD INJECTION
         # --------------------------------------------------------------------------
         required_root = []
         validations = yaml_schema.get("validations", {})
         mandatory = validations.get("mandatory_fields", {})
 
-        # Extract the list of required fields that must live at the root level
+        # Accumulate required fields mapped specifically to the root level of the document
         if "root" in mandatory:
             required_root.extend(mandatory["root"])
             
-       # Apply field constraints to sub-sections ('profile' and 'metadata') if they are defined
+        # Apply field existence constraints to nested sub-documents ('profile' and 'metadata')
         for sub_section in ["profile", "metadata"]:
             if sub_section in mandatory and sub_section in properties:
-                # Inject the array of required fields directly inside that specific object's definition
+                # Inject the 'required' array directly into the specific sub-object's schema node
                 properties[sub_section]["required"] = mandatory[sub_section]
 
         # ┌────────────────────────────────────────────────────────────────┐
-        # │ STRICT STRUCTURAL COMPLIANCE                                   │
+        # │ STRICT ARCHITECTURAL COMPLIANCE                                │
         # ├────────────────────────────────────────────────────────────────┤
-        # │ Enforce '_id' and 'type' at the root level, ensuring every     │
-        # │ registered Digital Twin document can be properly identified.   │
+        # │ Mandate the presence of '_id' and 'type' at the root level,    │
+        # │ ensuring consistent indexing and retrieval mechanisms.         │
         # └────────────────────────────────────────────────────────────────┘
         for default_field in ["_id", "type"]:
             if default_field not in required_root:
                 required_root.append(default_field)
 
-        # Assemble the final schema structure according to MongoDB's $jsonSchema spec
+        # Compile the final schema structure according to MongoDB's explicit $jsonSchema specification
         validation_schema = {
             "$jsonSchema": {
                 "bsonType": "object",
@@ -145,7 +178,7 @@ class SchemaRegistry:
                 "properties": {
                     "_id": {"bsonType": "string"},
                     "type": {"bsonType": "string"},
-                    **properties,        # Merges the processed common and entity fields dynamically
+                    **properties,  # Dynamically unpack the processed common and entity properties
                 },
             }
         }
@@ -153,17 +186,34 @@ class SchemaRegistry:
         return validation_schema
 
     # --------------------------------------------------------------------------
-    # UTILITY METHODS
+    # RUNTIME UTILITY ACCESSORS
     # --------------------------------------------------------------------------
     
     def get_collection_name(self, schema_type: str) -> str:
-        """Get collection name for schema type"""
-        # Dynamically formats the corresponding target MongoDB collection name (e.g., "pet_collection")
+        """
+        Derives the designated MongoDB collection name based on the schema classification.
+
+        Args:
+            schema_type (str): The targeted Digital Replica type.
+
+        Returns:
+            str: The dynamically formatted collection string (e.g., 'pet_collection').
+        """
         return f"{schema_type}_collection"
 
     def get_validation_schema(self, schema_type: str) -> Dict:
-        """Get validation schema for type"""
-        # Fetches the compiled schema from the registry cache. Blows up with an error if it doesn't exist.
+        """
+        Retrieves the pre-compiled MongoDB validation schema from the memory cache.
+
+        Args:
+            schema_type (str): The requested Digital Replica type.
+
+        Returns:
+            Dict: The compiled `$jsonSchema` dictionary.
+
+        Raises:
+            ValueError: If the requested schema type has not been loaded and compiled.
+        """
         if schema_type not in self.schemas:
-            raise ValueError(f"Schema not found for type: {schema_type}")
+            raise ValueError(f"Schema compilation missing for designated type: {schema_type}")
         return self.schemas[schema_type]

@@ -1,122 +1,136 @@
 #include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h> 
-#include <PubSubClient.h>
+#include <WiFiClientSecure.h> // Secure TLS connection library
+#include <MQTT.h>             // Replaced PubSubClient to support QoS 1 publishing
 
-// --- CREDENZIALI WIFI ---
-const char *ssid = "OnePlus 8";
-const char *password = "88888888";
+// --- WIFI CONFIGURATION ---
+const char *ssid = "FASTWEB-3QH6KF";
+const char *password = "E2XT6XK6JG";
 
-// --- COORDINATE HIVEMQ CLOUD (PRIVATE) ---
+// --- DIGITAL TWIN IDENTIFIERS ---
+const char* pet_id = "8feecdf5-8aec-4720-9196-6d1d9189c502";
+
+// --- HIVEMQ CLOUD COORDINATES (PRIVATE) ---
 const char* mqtt_server = "f91c2f750c5d4d2c9ff2177772a4ea75.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;
 const char* mqtt_user = "PetTracker";
 const char* mqtt_password = "PetTracker26";
 
-// --- TOPIC MQTT ---
-const char* topic_sub_buzzer = "casa/sound";
-const char* topic_lwt_stato  = "casa/buzzer/stato"; // Nuovo topic per lo stato LWT
+// --- MQTT TOPICS ---
+const char* topic_sub_buzzer = "home/sound";
+// LWT status topic dynamically generated using the unique pet_id
+String topic_lwt_status = String("home/") + pet_id + "/state"; 
 
 #define BUZZER_PIN D0
 
+// --- GLOBAL VARIABLES ---
 WiFiClientSecure espClient; 
-PubSubClient client(espClient);
+MQTTClient mqttClient(256); // Buffer size for MQTT payloads
 
-unsigned long ultimoTentativoMQTT = 0;
+unsigned long lastMqttAttempt = 0;
 
-void connettiWiFi() {
+// --- FUNCTION DECLARATIONS ---
+void connectWiFi();
+void attemptMqttReconnection();
+void mqttCallback(String &topic, String &payload);
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW); // Ensure it starts turned off
+
+  Serial.println("\n[STATUS] Starting NodeMCU Buzzer MQTT (TLS/SSL + QoS 1)...");
+
+  WiFi.mode(WIFI_STA); 
+  connectWiFi();
+  
+  mqttClient.begin(mqtt_server, mqtt_port, espClient);
+  mqttClient.onMessage(mqttCallback);
+}
+
+void loop() {
+  // Check and maintain network connections
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+    return; 
+  }
+
+  // Check and maintain MQTT connection
+  if (!mqttClient.connected()) {
+    attemptMqttReconnection();
+    return; 
+  }
+  
+  // Process incoming messages
+  mqttClient.loop();
+}
+
+// --- NETWORK AND MQTT LOGIC ---
+
+void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
   
-  Serial.print("\nConnessione WiFi a ");
+  Serial.print("\nConnecting to WiFi: ");
   Serial.print(ssid);
   
   WiFi.disconnect(); 
   delay(100);
   WiFi.begin(ssid, password);
   
-  int tentativi = 0;
-  while (WiFi.status() != WL_CONNECTED && tentativi < 20) {
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
-    tentativi++;
+    attempts++;
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi Connesso!");
+    Serial.println("\nWiFi Connected!");
     
-    // Accetta il certificato SSL del server HiveMQ
+    // REQUIRED FOR HIVE MQ CLOUD: 
+    // Instructs the microcontroller to accept the server's SSL certificate without validation.
     espClient.setInsecure();
   } else {
-    Serial.println("\nTimeout WiFi. Riprovo al prossimo ciclo...");
+    Serial.println("\nWiFi Timeout. Retrying on next cycle...");
   }
 }
 
-void callback(char* topic, byte* payload, unsigned int length) {
-  String messaggio = "";
-  for (unsigned int i = 0; i < length; i++) {
-    messaggio += (char)payload[i];
-  }
-  
-  Serial.print("Messaggio ricevuto sul topic: ");
-  Serial.println(topic);
-  
-  if (String(topic) == topic_sub_buzzer) {
-    if (messaggio == "ON" || messaggio == "1") {
-      Serial.println("CANE RILEVATO IN STANZA VIETATA! Attivazione Buzzer continua!");
-      digitalWrite(BUZZER_PIN, HIGH); // Il buzzer suona e resta acceso
-    } 
-    else if (messaggio == "OFF" || messaggio == "0") {
-      Serial.println("CANE USCITO. Disattivazione Buzzer.");
-      digitalWrite(BUZZER_PIN, LOW);  // Il buzzer si spegne
-    }
-  }
-}
+void attemptMqttReconnection() {
+  if (millis() - lastMqttAttempt > 5000) {
+    lastMqttAttempt = millis();
+    Serial.print("[STATUS] Attempting MQTT (TLS) connection...");
 
-void tentaRiconnessioneMQTT() {
-  if (millis() - ultimoTentativoMQTT > 5000) {
-    ultimoTentativoMQTT = millis();
-    Serial.print("Tentativo di connessione NodeMCU-Buzzer a MQTT (TLS)...");
+    // Setup Last Will and Testament (LWT) BEFORE connecting
+    // QoS = 1, Retained = true
+    mqttClient.setWill(topic_lwt_status.c_str(), "OFFLINE", true, 1);
 
-    // Connessione con LWT: se il dispositivo si scollega in modo anomalo, il broker pubblica "OFFLINE"
-    if (client.connect("NodeMCU-Buzzer-Client", mqtt_user, mqtt_password, topic_lwt_stato, 1, true, "OFFLINE")) {
-      Serial.println("connesso in sicurezza!");
+    // Attempt connection with Authentication (User/Pass)
+    if (mqttClient.connect("NodeMCU-Buzzer-Client", mqtt_user, mqtt_password)) {
+      Serial.println("Securely connected!");
       
-      // Pubblica lo stato ONLINE al momento della connessione riuscita
-      client.publish(topic_lwt_stato, "ONLINE", true);
+      // Publish the ONLINE status with the retained flag set to true (QoS 1)
+      mqttClient.publish(topic_lwt_status.c_str(), "ONLINE", true, 1);
       
-      // Iscrizione al topic di comando del server
-      client.subscribe(topic_sub_buzzer);
+      // Subscribe to the server command topic with QoS 1
+      mqttClient.subscribe(topic_sub_buzzer, 1);
+      Serial.printf("[STATUS] Subscribed to topic: %s\n", topic_sub_buzzer);
     } else {
-      Serial.print("fallito, rc=");
-      Serial.println(client.state());
+      Serial.print("Failed, return code = ");
+      Serial.println(mqttClient.returnCode());
     }
   }
 }
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW); // Assicuriamoci che parta spento
-
-  WiFi.mode(WIFI_STA); 
-  connettiWiFi();
+void mqttCallback(String &topic, String &payload) {
+  Serial.printf("[STATUS] Message received on topic: %s\n", topic.c_str());
   
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
-}
-
-void loop() {
-  // Mantieni attiva la connessione WiFi
-  if (WiFi.status() != WL_CONNECTED) {
-    connettiWiFi();
-    return; 
+  if (topic == String(topic_sub_buzzer)) {
+    if (payload == "ON" || payload == "1") {
+      Serial.println("[BUZZER] DOG DETECTED IN FORBIDDEN ROOM! Continuous Buzzer activated!");
+      digitalWrite(BUZZER_PIN, HIGH); // Turn the buzzer on and leave it on
+    } 
+    else if (payload == "OFF" || payload == "0") {
+      Serial.println("[BUZZER] DOG LEFT. Buzzer deactivated.");
+      digitalWrite(BUZZER_PIN, LOW);  // Turn the buzzer off
+    }
   }
-
-  // Mantieni attiva la connessione MQTT
-  if (!client.connected()) {
-    tentaRiconnessioneMQTT();
-    return; 
-  }
-  
-  // Elabora i messaggi in entrata
-  client.loop();
 }
