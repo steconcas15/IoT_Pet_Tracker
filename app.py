@@ -3,7 +3,7 @@
 This module serves as the core orchestrator for the application. It initializes 
 a Flask server that acts as the backbone for a Digital Twin architecture, 
 integrating an MQTT client for IoT communication, and a Telegram Bot for user 
-interaction via webhooks
+interaction via webhooks.
 """
 
 # ==============================================================================
