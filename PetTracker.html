@@ -152,9 +152,10 @@
             </button>
         </div>
 
+        <!-- Solo Pet Location rimasta nella dashboard -->
         <div class="row justify-content-center">
             <div class="col-md-6">
-                <div class="card p-4 text-center shadow-sm">
+                <div class="card p-4 text-center shadow-sm h-100">
                     <div class="d-flex justify-content-between align-items-center">
                         <h5 class="text-muted mb-0">Pet Location</h5>
                         <button class="refresh-btn" onclick="fetchPetStats()"><i class="bi bi-arrow-clockwise fs-5"></i></button>
@@ -327,6 +328,30 @@
                     <div class="col-md-6 mb-4"><canvas id="chartPetViolations"></canvas></div>
                     <div class="col-md-6 mb-4"><canvas id="chartPetAvgTime"></canvas></div>
                 </div>
+                
+                <!-- Behavior & Learning Analytics spostata qui sotto -->
+                <div class="card p-3 shadow-sm mt-2">
+                    <h5 class="text-muted mb-3"><i class="bi bi-clipboard2-data"></i> Behavior & Learning Analytics</h5>
+                    <div class="text-center mb-4 mt-2">
+                        <h4 id="petLearningStatus">Insufficient Data</h4>
+                        <small class="text-muted">Current Learning Status</small>
+                    </div>
+                    <div class="row text-center">
+                        <div class="col-4 border-end">
+                            <h5 id="petReactionTrend">-</h5>
+                            <small class="text-muted d-block">Reaction Time Trend</small>
+                        </div>
+                        <div class="col-4 border-end">
+                            <h5 id="petViolationsTrend">-</h5>
+                            <small class="text-muted d-block">Violations Trend</small>
+                        </div>
+                        <div class="col-4">
+                            <h5 id="petAvgReactionTime">-</h5>
+                            <small class="text-muted d-block">Avg Reaction (Recent)</small>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -334,6 +359,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // IP aggiornato
     const API_BASE_URL = 'http://192.168.1.64:5000/api'; 
     let authToken = localStorage.getItem('petTrackToken');
     let currentHomeId = localStorage.getItem('currentHomeId');
@@ -441,7 +467,6 @@
 
     async function generateOtp() {
         try {
-            // Aggiornato il percorso API
             const res = await apiCall('/auth/otp', 'POST');
             document.getElementById('otpGenerateBtn').classList.add('hidden');
             document.getElementById('otpInputArea').classList.remove('hidden');
@@ -457,7 +482,6 @@
         const code = document.getElementById('otpCodeInput').value;
         if (!code) return alert('Please enter the code');
         try {
-            // Aggiornato il percorso API
             await apiCall('/auth/otp/checks', 'POST', { otp_code: code });
             bootstrap.Modal.getInstance(document.getElementById('otpModal')).hide();
             
@@ -677,6 +701,7 @@
         if (!data || !data.pet) return;
         const pet = data.pet;
         
+        // Aggiorna solo la posizione nella dashboard
         document.getElementById('petNameDisplay').innerText = pet.pet_name;
         document.getElementById('petCurrentRoom').innerText = pet.current_room || 'Outside';
         
@@ -740,9 +765,14 @@
             const pet = res.data.pet;
             
             const stats = pet.daily_buzzer_stats || []; 
-            const dataPoints = stats.length > 0 ? stats : [{ date: new Date().toISOString(), auto_violations_count: pet.auto_violations_count, auto_duration_mins: pet.auto_duration_mins }];
             
-            const labels = dataPoints.map(s => new Date(s.date).toLocaleDateString('en-US', { day: '2-digit', month: '2-digit' }));
+            // INVERTIAMO L'ARRAY: Il backend li invia dal più recente al più vecchio. 
+            const reversedStats = [...stats].reverse();
+            
+            const dataPoints = reversedStats.length > 0 ? reversedStats : [{ date: new Date().toISOString(), auto_violations_count: pet.auto_violations_count, auto_duration_mins: pet.auto_duration_mins }];
+            
+            // Usiamo 'en-GB' per avere il formato GG/MM
+            const labels = dataPoints.map(s => new Date(s.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }));
             const violations = dataPoints.map(s => s.auto_violations_count || 0);
             const avgTime = dataPoints.map(s => (s.auto_violations_count > 0 && s.auto_duration_mins > 0) ? (s.auto_duration_mins / s.auto_violations_count).toFixed(2) : 0);
 
@@ -760,6 +790,39 @@
                 data: { labels: labels, datasets: [{ label: 'Average Buzzer Time (min)', data: avgTime, borderColor: 'rgba(255, 193, 7, 1)', backgroundColor: 'rgba(255, 193, 7, 0.2)', fill: true, tension: 0.3 }] },
                 options: { responsive: true, scales: { y: { beginAtZero: true } } }
             });
+
+            // Aggiorniamo le Analytics dentro il modale dei grafici
+            const analytics = pet.learning_analytics || {};
+            const statusEl = document.getElementById('petLearningStatus');
+            let statusText = analytics.learning_status || "Insufficient Data";
+            let statusClass = "bg-secondary";
+            
+            if (statusText.includes("Improving") || statusText.includes("Trained")) {
+                statusClass = "bg-success";
+            } else if (statusText.includes("Regressing")) {
+                statusClass = "bg-danger";
+            } else if (statusText.includes("Stationary")) {
+                statusClass = "bg-warning text-dark";
+            }
+            
+            statusEl.innerHTML = `<span class="badge ${statusClass} fs-6 p-2">${statusText}</span>`;
+
+            const reactionTrend = analytics.reaction_time_trend_percent || 0;
+            const reactionEl = document.getElementById('petReactionTrend');
+            let reactionIcon = '';
+            if (reactionTrend < 0) reactionIcon = '<i class="bi bi-arrow-down-circle-fill text-success"></i> '; 
+            else if (reactionTrend > 0) reactionIcon = '<i class="bi bi-arrow-up-circle-fill text-danger"></i> '; 
+            reactionEl.innerHTML = reactionIcon + Math.abs(reactionTrend) + '%';
+
+            const violationsTrend = analytics.violations_trend_percent || 0;
+            const violationsEl = document.getElementById('petViolationsTrend');
+            let violationsIcon = '';
+            if (violationsTrend < 0) violationsIcon = '<i class="bi bi-arrow-down-circle-fill text-success"></i> '; 
+            else if (violationsTrend > 0) violationsIcon = '<i class="bi bi-arrow-up-circle-fill text-danger"></i> '; 
+            violationsEl.innerHTML = violationsIcon + Math.abs(violationsTrend) + '%';
+
+            const avgReaction = analytics.avg_reaction_time_recent || 0;
+            document.getElementById('petAvgReactionTime').innerText = avgReaction + ' min';
 
             new bootstrap.Modal(document.getElementById('petChartsModal')).show();
         } catch (err) { alert("Error loading pet charts: " + err.message); }

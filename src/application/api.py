@@ -722,7 +722,8 @@ def get_pet_statistics(dt_id):
                     "current_room": pet_data.get("current_room", ""),
                     "buzzer_status": pet_data.get("buzzer_status", ""),
                     "is_buzzer_active_now": bool(last_buzzer_start),
-                    "daily_buzzer_stats": daily_buzzer_stats  
+                    "daily_buzzer_stats": daily_buzzer_stats,
+                    "learning_analytics": pet_data.get("learning_analytics", {}) 
                 }
                 
                 # Single pet constraint allows us to break early

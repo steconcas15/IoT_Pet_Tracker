@@ -15,6 +15,7 @@ schemas:
       buzzer_status: str
       last_buzzer_start_time: datetime
       daily_buzzer_stats: List[Dict]
+      learning_analytics: Dict
 
   validations:
     type_constraints:
@@ -35,6 +36,8 @@ schemas:
             date: datetime
             auto_violations_count: int
             auto_duration_mins: float
+      learning_analytics:
+        type: Dict
             
     initialization:
       data:
@@ -42,3 +45,4 @@ schemas:
         buzzer_status: "UNKNOWN"
         last_buzzer_start_time: null
         daily_buzzer_stats: []
+        learning_analytics: {}

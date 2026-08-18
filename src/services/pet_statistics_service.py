@@ -26,6 +26,73 @@ class PetStatisticsService(BaseService):
         super().__init__()
         self.name = "PetStatisticsService"
 
+    def _calculate_learning_trends(self, stats: list) -> Dict[str, Any]:
+        """
+        Analyzes the 30-day historical ledger to calculate learning trends.
+        Compares recent behavioral data against a preceding temporal window 
+        to determine training progress.
+        
+        Args:
+            stats (list): The chronological array of daily statistical buckets.
+            
+        Returns:
+            Dict[str, Any]: A dictionary containing calculated performance metrics 
+                            and a qualitative learning status.
+        """
+        # 1. Initialize the default analytics payload
+        analytics = {
+            "reaction_time_trend_percent": 0.0,
+            "violations_trend_percent": 0.0,
+            "learning_status": "Insufficient Data",
+            "avg_reaction_time_recent": 0.0
+        }
+
+        # 2. Require a minimum temporal baseline to perform comparative analysis
+        if len(stats) < 2:
+            return analytics
+
+        # 3. Partition the ledger into two comparative windows (max 7 days each)
+        mid_point = min(7, len(stats) // 2) if len(stats) < 14 else 7
+        
+        recent_stats = stats[:mid_point]
+        previous_stats = stats[mid_point:mid_point*2]
+
+        if not previous_stats:
+            return analytics
+
+        # Helper function to aggregate raw metrics safely
+        def get_totals(data_slice):
+            tot_duration = sum(d.get("auto_duration_mins", 0.0) for d in data_slice)
+            tot_violations = sum(d.get("auto_violations_count", 0) for d in data_slice)
+            avg_reaction = (tot_duration / tot_violations) if tot_violations > 0 else 0.0
+            return tot_violations, avg_reaction
+
+        # 4. Extract aggregated totals and averages for both temporal windows
+        recent_violations, recent_reaction = get_totals(recent_stats)
+        prev_violations, prev_reaction = get_totals(previous_stats)
+
+        analytics["avg_reaction_time_recent"] = round(recent_reaction, 2)
+
+        # 5. Calculate percentage variations using the mathematical formula:
+        # \( \frac{\text{Recent} - \text{Previous}}{\text{Previous}} \times 100 \)
+        if prev_reaction > 0:
+            analytics["reaction_time_trend_percent"] = round(((recent_reaction - prev_reaction) / prev_reaction) * 100, 2)
+        
+        if prev_violations > 0:
+            analytics["violations_trend_percent"] = round(((recent_violations - prev_violations) / prev_violations) * 100, 2)
+
+        # 6. Evaluate the calculated trends to assign a qualitative learning state
+        if analytics["reaction_time_trend_percent"] < -10 or analytics["violations_trend_percent"] < -10:
+            analytics["learning_status"] = "Learning (Improving)"
+        elif recent_violations == 0 and prev_violations == 0:
+            analytics["learning_status"] = "Trained (No Violations)"
+        elif analytics["reaction_time_trend_percent"] > 10 or analytics["violations_trend_percent"] > 10:
+            analytics["learning_status"] = "Regressing / Disobedient"
+        else:
+            analytics["learning_status"] = "Stationary"
+
+        return analytics
+
     def execute(self, data: Dict, dr_type: str = "pet", attribute: str = None) -> Any:
         """
         Executes the statistical aggregation algorithm.
@@ -101,9 +168,13 @@ class PetStatisticsService(BaseService):
         # (truncate the array if it exceeds the boundary)
         daily_buzzer_stats = daily_buzzer_stats[:30]
 
-        # 5. Database Synchronization: Persist the mutated ledger back to the target Digital Replica
+        # 5. Behavioral Analytics: Extract learning trends from the updated historical ledger
+        learning_analytics = self._calculate_learning_trends(daily_buzzer_stats)
+
+        # 6. Database Synchronization: Persist the mutated ledger and analytics back to the target Digital Replica
         update_payload = {
-            "data.daily_buzzer_stats": daily_buzzer_stats
+            "data.daily_buzzer_stats": daily_buzzer_stats,
+            "data.learning_analytics": learning_analytics
         }
         db_service.update_dr(dr_type=dr_type, dr_id=pet_id, update_data=update_payload) 
 
