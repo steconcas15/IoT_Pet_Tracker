@@ -36,7 +36,7 @@ class PetDetectionService(BaseService):
         
         Args:
             data (dict): Standard payload containing the registered digital replicas.
-            **kwargs: Must contain 'image_path', 'room_name', 'db_service', and 'pet_detector'.
+            **kwargs: Must contain 'image_path', 'room_name', 'room_id', 'db_service', and 'pet_detector'.
             
         Returns:
             bool: True if a pet was detected, False otherwise.
@@ -46,11 +46,12 @@ class PetDetectionService(BaseService):
         """
         image_path = kwargs.get("image_path")
         room_name = kwargs.get("room_name")  
+        room_id = kwargs.get("room_id")      # 1. NEW: Explicitly require the unique room identifier
         db_service = kwargs.get("db_service")
         pet_detector = kwargs.get("pet_detector")
 
         # Validate mandatory structural dependencies
-        if not all([image_path, room_name, db_service, pet_detector]):
+        if not all([image_path, room_name, room_id, db_service, pet_detector]):
             raise ValueError("Missing required parameters for PetDetectionService.")
 
         # Extract the specific pet replica from the twin's environment
@@ -109,17 +110,21 @@ class PetDetectionService(BaseService):
             
             # STEP 1: Process exit from the previous room (calculating accrued statistics)
             if previous_room:
-                self._handle_pet_exit(previous_room, db_service)
+                # Isolate the search strictly within the current Digital Twin to prevent cross-home collisions
+                previous_room_id = self._find_room_id_in_twin(previous_room, replicas, db_service)
+                if previous_room_id:
+                    self._handle_pet_exit(previous_room_id, db_service)
                 
-            # STEP 2: Process entry into the new room (initializing the occupancy timer)
-            self._handle_pet_entry(room_name, db_service)
+            # STEP 2: Process entry into the new room using the unique ID
+            self._handle_pet_entry(room_id, db_service)
             
             # STEP 3: Update the current location property on the pet's Digital Replica
+            # We preserve the room_name for frontend readability, while backend logic relies on IDs
             db_service.update_dr("pet", pet_id, {"data.current_room": room_name})
             print(f"  -> DB Pet: 'current_room' successfully updated to '{room_name}'.")
             
             # STEP 4: Evaluate security policies and trigger MQTT/Telegram alarms if necessary
-            self._trigger_alarms(room_name, db_service, str(pet_id))
+            self._trigger_alarms(room_id, db_service, str(pet_id))
             
         return True
 
@@ -127,16 +132,29 @@ class PetDetectionService(BaseService):
     # HELPER METHODS
     # -------------------------------------------------------------------------
 
-    def _handle_pet_exit(self, room_name: str, db_service):
+    def _find_room_id_in_twin(self, room_name: str, replicas: list, db_service) -> str:
+        """
+        Locates the exact room ID within the current Digital Twin context.
+        This prevents cross-environment collisions when exiting a room by ensuring 
+        we don't query a room with the same name belonging to another user.
+        """
+        for rep in replicas:
+            if rep.get("type") == "room":
+                room_dr = db_service.get_dr("room", rep.get("id"))
+                if room_dr and room_dr.get("profile", {}).get("name") == room_name:
+                    return str(rep.get("id"))
+        return None
+
+    def _handle_pet_exit(self, room_id: str, db_service):
         """
         Manages the logic for exiting a room: calculates elapsed time and updates aggregated statistics.
+        Refactored to rely exclusively on unique entity IDs.
         """
-        rooms = db_service.query_drs("room", {"profile.name": room_name})
-        if not rooms:
+        room_data = db_service.get_dr("room", room_id)
+        if not room_data:
             return
             
-        room_data = rooms[0]
-        room_id = room_data["_id"]
+        room_name = room_data.get("profile", {}).get("name", "Unknown")
         current_status = room_data.get("data", {}).get("status", "empty")
 
         if current_status == "occupied":
@@ -178,38 +196,39 @@ class PetDetectionService(BaseService):
                 "data.status": "empty",
                 "data.last_entry_time": None
             })
-            print(f"  -> DB Room: '{room_name}' cleared. Statistics updated ({duration_minutes:.2f} min).")
+            print(f"  -> DB Room ID '{room_id}' ({room_name}) cleared. Statistics updated ({duration_minutes:.2f} min).")
 
 
-    def _handle_pet_entry(self, room_name: str, db_service):
+    def _handle_pet_entry(self, room_id: str, db_service):
         """
         Manages the logic for entering a room: mutates state to 'occupied' and starts the timer.
+        Refactored to rely exclusively on unique entity IDs.
         """
-        rooms = db_service.query_drs("room", {"profile.name": room_name})
-        if not rooms:
-            print(f"  -> WARNING: The room '{room_name}' does not exist in the database.")
+        room_data = db_service.get_dr("room", room_id)
+        if not room_data:
+            print(f"  -> WARNING: The room with ID '{room_id}' does not exist in the database.")
             return
-            
-        room_data = rooms[0]
-        room_id = room_data["_id"]
 
         db_service.update_dr("room", str(room_id), {
             "data.status": "occupied",
             "data.last_entry_time": datetime.now(timezone.utc)
         })
-        print(f"  -> DB Room: '{room_name}' occupied. Timer initiated.")
+        print(f"  -> DB Room ID '{room_id}' occupied. Timer initiated.")
 
 
-    def _trigger_alarms(self, room_name: str, db_service, pet_id: str):
+    def _trigger_alarms(self, room_id: str, db_service, pet_id: str):
         """
         Evaluates room permission levels and dispatches MQTT hardware alarms 
         and Telegram software notifications if policies are violated.
+        Refactored to rely exclusively on unique entity IDs.
         """
-        rooms = db_service.query_drs("room", {"profile.name": room_name})
-        if not rooms:
+        room_data = db_service.get_dr("room", room_id)
+        if not room_data:
             return
             
-        permission_level = rooms[0].get("profile", {}).get("permission_level", "allowed")
+        permission_level = room_data.get("profile", {}).get("permission_level", "allowed")
+        room_name = room_data.get("profile", {}).get("name", "Unknown")
+        
         pet_dr = db_service.get_dr("pet", pet_id)
         last_buzzer_start = pet_dr.get("data", {}).get("last_buzzer_start_time")
         

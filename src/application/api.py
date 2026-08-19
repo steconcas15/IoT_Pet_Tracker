@@ -425,6 +425,7 @@ def receive_telemetry(dt_id, room_id):
                         service_name="PetDetectionService",
                         image_path=filepath,
                         room_name=room_name,
+                        room_id=room_id,
                         db_service=db_service,
                         pet_detector=pet_detector
                     )
