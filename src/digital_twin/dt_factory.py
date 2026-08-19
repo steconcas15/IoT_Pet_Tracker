@@ -190,7 +190,7 @@ class DTFactory:
             Dict[str, str]: A dictionary of available analytical and computational services.
         """
         return {
-            "PetDetectionService": "src.services.petdetection_service",
+            "PetDetectionService": "src.services.pet_detection_service",
             "RoomStatisticsService": "src.services.room_statistics_service",
             "PetStatisticsService": "src.services.pet_statistics_service",
         }
