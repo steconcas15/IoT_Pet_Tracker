@@ -8,13 +8,14 @@ schemas:
     metadata:
       created_at: datetime
       updated_at: datetime
-      status: str
+      otp_code: str
+      otp_expires_at: datetime
+      otp_verified: bool
 
   entity:
     data:
       owned_homes: List[str]
       viewable_homes: List[str]
-      last_login: datetime
 
   validations:
     mandatory_fields:
@@ -27,25 +28,26 @@ schemas:
       metadata:
         - created_at
         - updated_at
-        - status
+        - otp_verified
 
     type_constraints:
       username:
         type: str
       password:
         type: str
-      status:
-        type: str
-        enum: ["active", "inactive", "suspended"]
       owned_homes:
         type: List[str]
       viewable_homes:
         type: List[str]
-      last_login:
+      otp_code:
+        type: str
+      otp_expires_at:
         type: datetime
+      otp_verified:
+        type: bool
 
     initialization:
       metadata:
-        status: "active"
+        otp_verified: false
       owned_homes: []
       viewable_homes: []

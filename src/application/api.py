@@ -950,9 +950,11 @@ def generate_otp():
             dr_type='user',
             dr_id=current_user_id,
             update_data={
-                "data.otp_code": otp_code,
-                "data.otp_expires_at": expires_at.isoformat(),
-                "data.otp_verified": False
+                "metadata": {
+                    "otp_code": otp_code,
+                    "otp_expires_at": expires_at.isoformat(),
+                    "otp_verified": False
+                }
             }
         )
         
@@ -1001,9 +1003,9 @@ def verify_otp():
         if not user:
             return jsonify({'error': 'User not found.'}), 404
 
-        user_data = user.get('data', {})
-        saved_otp = user_data.get('otp_code')
-        expires_at_str = user_data.get('otp_expires_at')
+        user_metadata = user.get('metadata', {})
+        saved_otp = user_metadata.get('otp_code')
+        expires_at_str = user_metadata.get('otp_expires_at')
 
         # Challenge parity check
         if not saved_otp or saved_otp != user_otp:
@@ -1020,9 +1022,11 @@ def verify_otp():
             dr_type='user',
             dr_id=current_user_id,
             update_data={
-                "data.otp_code": None,
-                "data.otp_expires_at": None,
-                "data.otp_verified": True
+                "metadata": {
+                    "otp_code": None,
+                    "otp_expires_at": None,
+                    "otp_verified": True
+                }
             }
         )
 
