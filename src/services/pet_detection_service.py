@@ -63,7 +63,7 @@ class PetDetectionService(BaseService):
             return False
 
         # Safely cast the identifier to a MongoDB ObjectId
-        raw_pet_id = pet_ref.get("_id")
+        raw_pet_id = pet_ref.get("id") or pet_ref.get("_id")
         pet_id = ObjectId(raw_pet_id) if ObjectId.is_valid(raw_pet_id) else raw_pet_id
         
         # Retrieve current pet state from the database
@@ -140,9 +140,11 @@ class PetDetectionService(BaseService):
         """
         for rep in replicas:
             if rep.get("type") == "room":
-                room_dr = db_service.get_dr("room", rep.get("id"))
+                raw_id = rep.get("id") or rep.get("_id")
+                search_id = ObjectId(raw_id) if ObjectId.is_valid(raw_id) else raw_id
+                room_dr = db_service.get_dr("room", search_id)
                 if room_dr and room_dr.get("profile", {}).get("name") == room_name:
-                    return str(rep.get("id"))
+                    return str(raw_id)
         return None
 
     def _handle_pet_exit(self, room_id: str, db_service):
@@ -150,7 +152,8 @@ class PetDetectionService(BaseService):
         Manages the logic for exiting a room: calculates elapsed time and updates aggregated statistics.
         Refactored to rely exclusively on unique entity IDs.
         """
-        room_data = db_service.get_dr("room", room_id)
+        search_id = ObjectId(room_id) if ObjectId.is_valid(room_id) else room_id
+        room_data = db_service.get_dr("room", search_id)
         if not room_data:
             return
             
@@ -192,7 +195,7 @@ class PetDetectionService(BaseService):
             })
 
             # 2. Reset the room's physical state and clear the active timer
-            db_service.update_dr("room", str(room_id), {
+            db_service.update_dr("room", search_id, {
                 "data.status": "empty",
                 "data.last_entry_time": None
             })
@@ -204,12 +207,13 @@ class PetDetectionService(BaseService):
         Manages the logic for entering a room: mutates state to 'occupied' and starts the timer.
         Refactored to rely exclusively on unique entity IDs.
         """
-        room_data = db_service.get_dr("room", room_id)
+        search_id = ObjectId(room_id) if ObjectId.is_valid(room_id) else room_id
+        room_data = db_service.get_dr("room", search_id)
         if not room_data:
             print(f"  -> WARNING: The room with ID '{room_id}' does not exist in the database.")
             return
 
-        db_service.update_dr("room", str(room_id), {
+        db_service.update_dr("room", search_id, {
             "data.status": "occupied",
             "data.last_entry_time": datetime.now(timezone.utc)
         })
@@ -222,20 +226,24 @@ class PetDetectionService(BaseService):
         and Telegram software notifications if policies are violated.
         Refactored to rely exclusively on unique entity IDs.
         """
-        room_data = db_service.get_dr("room", room_id)
+        search_room_id = ObjectId(room_id) if ObjectId.is_valid(room_id) else room_id
+        room_data = db_service.get_dr("room", search_room_id)
         if not room_data:
             return
             
         permission_level = room_data.get("profile", {}).get("permission_level", "allowed")
         room_name = room_data.get("profile", {}).get("name", "Unknown")
         
-        pet_dr = db_service.get_dr("pet", pet_id)
+        search_pet_id = ObjectId(pet_id) if ObjectId.is_valid(pet_id) else pet_id
+        pet_dr = db_service.get_dr("pet", search_pet_id)
+        if not pet_dr:
+            return
         last_buzzer_start = pet_dr.get("data", {}).get("last_buzzer_start_time")
         
         # Policy Enforcement: Activate Alarm (ON)
         if permission_level == "forbidden":
             if not last_buzzer_start:
-                db_service.update_dr("pet", pet_id, {
+                db_service.update_dr("pet", search_pet_id, {
                     "data.last_buzzer_start_time": datetime.now(timezone.utc)
                 })
                 
@@ -250,7 +258,8 @@ class PetDetectionService(BaseService):
             # 2. Software notification dispatch via Telegram
             try:
                 send_unauthorized_room_alert(room_name)
-                print(f"  -> 📲 TELEGRAM: Intrusion notification dispatched for room {room_name}.")
+                current_time = datetime.now().strftime("%H:%M:%S")
+                print(f"  -> 📲 TELEGRAM: [{current_time}] Intrusion notification dispatched for room {room_name}.")
             except Exception as e:
                 print(f"  -> [TELEGRAM] Notification dispatch error: {e}")
 
@@ -277,7 +286,7 @@ class PetDetectionService(BaseService):
                     "violations_to_add": 1
                 })
                 
-                db_service.update_dr("pet", pet_id, {
+                db_service.update_dr("pet", search_pet_id, {
                     "data.last_buzzer_start_time": None
                 })
             
