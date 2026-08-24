@@ -188,6 +188,6 @@ async def logout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if telegram_id in LOGGED_USERS:
         del LOGGED_USERS[telegram_id]
-        await update.message.reply_text("Successfully logged out from the Digital Twin.")
+        await update.message.reply_text("Successfully logged out.")
     else:
         await update.message.reply_text("You are not currently logged in.")
