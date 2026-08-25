@@ -1,4 +1,4 @@
-# Pet Tracker - IoT Digital Twin System
+# IoT Pet Tracker - Digital Twin System
 
 An IoT system based on **Digital Twin (DT)** architecture for the tracking, real-time monitoring, and behavioral training of pets (dogs and cats) in indoor environments.
 
