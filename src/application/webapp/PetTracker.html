@@ -743,7 +743,7 @@
         document.getElementById('petCurrentRoom').innerText = pet.current_room || 'Outside';
         
         const buzzerSpan = document.getElementById('buzzerStatus');
-        if (pet.buzzer_status === "ON") {
+        if (pet.buzzer_state === "ON") {
             buzzerSpan.innerText = "Buzzer ON - ALARM!";
             buzzerSpan.className = "badge bg-danger fs-6 buzzer-active";
         } else {

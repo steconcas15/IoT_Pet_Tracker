@@ -117,8 +117,8 @@ def send_offline_alert(home_id, offline_devices, all_offline):
         all_offline (bool): Flag indicating a total environment blackout.
     """
     # Local imports utilized to prevent circular dependency resolution issues
-    from bot.handlers.login_handlers import LOGGED_USERS
-    from bot.config.settings import TELEGRAM_TOKEN
+    from src.application.bot.handlers.login_handlers import LOGGED_USERS
+    from src.application.bot.config.settings import TELEGRAM_TOKEN
     import requests
 
     if not TELEGRAM_TOKEN:
@@ -178,8 +178,8 @@ def send_online_recovery(home_id):
     Args:
         home_id (str): The environment identifier that has recovered.
     """
-    from bot.handlers.login_handlers import LOGGED_USERS
-    from bot.config.settings import TELEGRAM_TOKEN
+    from src.application.bot.handlers.login_handlers import LOGGED_USERS
+    from src.application.bot.config.settings import TELEGRAM_TOKEN
     import requests
 
     if not TELEGRAM_TOKEN:

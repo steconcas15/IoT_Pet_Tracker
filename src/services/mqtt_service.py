@@ -105,7 +105,7 @@ class MQTTManager:
 
                     # Dispatch alert if any devices remain offline after the 30-second window
                     if len(offline_devices) > 0:
-                        from bot.notifier import send_offline_alert
+                        from src.application.bot.notifier import send_offline_alert
                         all_offline = (len(offline_devices) == total_devices and total_devices > 0)
                         send_offline_alert(home_id, offline_devices, all_offline)
                         
@@ -171,7 +171,7 @@ class MQTTManager:
                     # Trigger recovery notification if the environment is fully operational
                     if offline_count == 0:
                         print(f"[MQTT DEBUG] Home {home_id}: All devices are ONLINE! Sending recovery notification.")
-                        from bot.notifier import send_online_recovery
+                        from src.application.bot.notifier import send_online_recovery
                         send_online_recovery(home_id)
                         
         except Exception as e:

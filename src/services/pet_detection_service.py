@@ -15,7 +15,7 @@ from bson import ObjectId
 import os
 from flask import current_app
 from datetime import datetime, timezone, timedelta
-from bot.notifier import send_unauthorized_room_alert
+from src.application.bot.notifier import send_unauthorized_room_alert
 
 class PetDetectionService(BaseService):
     """
