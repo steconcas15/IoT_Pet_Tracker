@@ -3,7 +3,7 @@
 This module manages the Telegram Bot interface and alerting subsystem for the IoT platform. It connects the asynchronous python-telegram-bot framework with synchronous Flask backend routes, background workers, and MQTT alert events.
 
 ---
-## Repository Structure
+## Directory Structure
 
 ```
 bot/
