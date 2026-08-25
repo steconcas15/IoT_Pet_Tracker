@@ -22,7 +22,7 @@ Make sure your weights file is placed inside the `yolov11_model` folder next to 
 
 ```
 vision/
-├── detector.py             # The PetDetector class module
+├── model.py                # The PetDetector class module
 └── yolov11_model/
     └── yolo11l.pt          # Pre-trained YOLO11 Large weights file
 ```
