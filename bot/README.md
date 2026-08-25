@@ -66,21 +66,3 @@ The notifier sends direct HTTP POST requests to the Telegram API so background t
 * **OTP Dispatch (`send_otp_to_telegram`):** Sends 6-digit authentication codes directly to the user chat.
 * **Hardware Offline Watchdog (`send_offline_alert`):** Warns users when one or all IoT devices in a home disconnect. It tracks message IDs so it can clean them up later.
 * **Auto Recovery Cleanup (`send_online_recovery`):** Deletes previous offline error messages from the chat once all devices come back online, then posts a recovery confirmation.
-
----
-
-## Environment Variables Configuration
-
-Create a `.env` file in the root directory:
-
-```env
-# Telegram Bot Configuration
-TELEGRAM_TOKEN=your_telegram_bot_token
-
-# Ngrok Configuration (for local webhook development)
-NGROK_TOKEN=your_ngrok_auth_token
-
-# Server Configuration
-PORT=5000
-JWT_SECRET_KEY=your_secret_key
-```
