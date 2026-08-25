@@ -1,4 +1,4 @@
-# IoT Pet Tracker -Applications
+# IoT Pet Tracker - Applications
 
 This directory contains the application layer components of the Digital Twin system. It provides interfaces and tools for interacting with Digital Twins, including APIs, visualization components, and user interfaces.
 
