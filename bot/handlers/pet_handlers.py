@@ -148,14 +148,14 @@ async def buzzer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
         # 2. Evaluate current hardware state to implement a toggle logic
-        current_status = pet_dr.get("data", {}).get("buzzer_status", "OFF")
+        current_status = pet_dr.get("data", {}).get("buzzer_state", "OFF")
 
         if current_status == "ON":
             # Manual deactivation by the user (Updated topic and QoS)
             mqtt_manager.client.publish("home/sound", "OFF", qos=1)
             
             db_service.update_dr(dr_type="pet", dr_id=pet_id, update_data={
-                "data.buzzer_status": "OFF"
+                "data.buzzer_state": "OFF"
             })
             
             await update.message.reply_text(f"🔇 **Buzzer deactivated** manually for {pet_name}.", parse_mode='Markdown')
@@ -165,7 +165,7 @@ async def buzzer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mqtt_manager.client.publish("home/sound", "ON", qos=1)
             
             db_service.update_dr(dr_type="pet", dr_id=pet_id, update_data={
-                "data.buzzer_status": "ON",
+                "data.buzzer_state": "ON",
                 "data.last_buzzer_start_time": datetime.now(timezone.utc).isoformat()
             })
 

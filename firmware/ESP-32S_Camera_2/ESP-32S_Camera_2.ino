@@ -180,6 +180,7 @@ void attemptMqttReconnection() {
     // Configure Last Will and Testament (LWT) parameters BEFORE establishing connection
     // QoS = 1, Retained = true. Utilizes dynamically generated topic_lwt_status
     mqttClient.setWill(topic_lwt_status.c_str(), "OFFLINE", true, 1);
+    mqttClient.setKeepAlive(60);
 
     // Attempt connection utilizing user credentials
     if (mqttClient.connect(clientID.c_str(), mqtt_user, mqtt_password)) {

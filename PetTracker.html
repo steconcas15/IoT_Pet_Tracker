@@ -34,7 +34,6 @@
 
 <div class="container" id="appContainer">
     
-    <!-- LOGIN / REGISTER VIEW -->
     <div id="authView" class="row justify-content-center">
         <div class="col-md-5">
             <div class="card p-4">
@@ -56,7 +55,6 @@
         </div>
     </div>
 
-    <!-- HOME SELECTION VIEW -->
     <div id="homeSelectionView" class="hidden">
         <h2 class="mb-4 text-center">Your Homes</h2>
         <div class="row justify-content-center">
@@ -69,7 +67,6 @@
         </div>
     </div>
 
-    <!-- SETUP WIZARD VIEW -->
     <div id="setupView" class="hidden">
         <h2 class="mb-4 text-center">Environment Setup</h2>
         <div class="row justify-content-center">
@@ -128,13 +125,33 @@
                     </div>
 
                     <div id="setupStatus" class="text-muted small mt-2"></div>
-                    <button id="goToDashboardBtn" class="btn btn-primary mt-3 hidden w-100" onclick="showDashboard()">Go to Dashboard</button>
+                    
+                    <hr class="my-4">
+                    
+                    <div class="mt-4">
+                        <h6 class="text-muted">Components added so far:</h6>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <small class="text-muted d-block mb-1">Rooms</small>
+                                <ul id="setupRoomList" class="list-group list-group-flush small"></ul>
+                            </div>
+                            <div class="col-md-4">
+                                <small class="text-muted d-block mb-1">Doors</small>
+                                <ul id="setupDoorList" class="list-group list-group-flush small"></ul>
+                            </div>
+                            <div class="col-md-4">
+                                <small class="text-muted d-block mb-1">Pets</small>
+                                <ul id="setupPetList" class="list-group list-group-flush small"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="goToDashboardBtn" class="btn btn-primary mt-4 hidden w-100" onclick="showDashboard()">Go to Dashboard</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- DASHBOARD VIEW -->
     <div id="dashboardView" class="hidden">
         <div class="d-flex justify-content-between align-items-center mb-5">
             <div>
@@ -152,7 +169,6 @@
             </button>
         </div>
 
-        <!-- Solo Pet Location rimasta nella dashboard -->
         <div class="row justify-content-center">
             <div class="col-md-6">
                 <div class="card p-4 text-center shadow-sm h-100">
@@ -169,7 +185,6 @@
         </div>
     </div>
 
-    <!-- MANAGEMENT VIEW (Admin) -->
     <div id="managementView" class="hidden">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
@@ -243,7 +258,6 @@
         </div>
     </div>
 
-    <!-- PROFILE VIEW -->
     <div id="profileView" class="hidden">
         <div class="row justify-content-center">
             <div class="col-md-6">
@@ -275,7 +289,6 @@
     </div>
 </div>
 
-<!-- MODAL OTP VERIFICATION -->
 <div class="modal fade" id="otpModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -297,7 +310,6 @@
     </div>
 </div>
 
-<!-- MODAL ROOM CHARTS -->
 <div class="modal fade" id="roomChartsModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -315,7 +327,6 @@
     </div>
 </div>
 
-<!-- MODAL PET CHARTS -->
 <div class="modal fade" id="petChartsModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -329,7 +340,6 @@
                     <div class="col-md-6 mb-4"><canvas id="chartPetAvgTime"></canvas></div>
                 </div>
                 
-                <!-- Behavior & Learning Analytics spostata qui sotto -->
                 <div class="card p-3 shadow-sm mt-2">
                     <h5 class="text-muted mb-3"><i class="bi bi-clipboard2-data"></i> Behavior & Learning Analytics</h5>
                     <div class="text-center mb-4 mt-2">
@@ -359,8 +369,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // IP aggiornato
-    const API_BASE_URL = 'http://192.168.1.58:5000/api'; 
+    const API_BASE_URL = 'http://192.168.1.64:5000/api'; 
     let authToken = localStorage.getItem('petTrackToken');
     let currentHomeId = localStorage.getItem('currentHomeId');
     let currentHomeRole = localStorage.getItem('currentHomeRole');
@@ -453,7 +462,6 @@
         fetchPetStats(); 
     }
 
-    // ===== LOGICA OTP =====
     function requestOtpAccess(action, payload = null) {
         pendingOtpAction = { type: action, payload: payload };
         
@@ -666,8 +674,37 @@
             localStorage.setItem('currentHomeRole', currentHomeRole);
             document.getElementById('stepHome').classList.add('hidden');
             document.getElementById('stepComponents').classList.remove('hidden');
+            fetchSetupComponents();
         } catch (err) { alert(err.message); }
     });
+
+    async function fetchSetupComponents() {
+        try {
+            const res = await apiCall('/dt/' + currentHomeId + '/management', 'GET');
+            const d = res.data;
+            renderSetupList('setupRoomList', d.rooms);
+            renderSetupList('setupDoorList', d.doors);
+            renderSetupList('setupPetList', d.pets);
+        } catch(err) {
+            console.error("Error fetching setup components:", err);
+        }
+    }
+
+    function renderSetupList(elementId, items) {
+        const ul = document.getElementById(elementId);
+        ul.innerHTML = '';
+        if (items.length === 0) {
+            ul.innerHTML = '<li class="list-group-item text-muted py-1">None yet</li>';
+            return;
+        }
+        items.forEach(function(item) {
+            let badge = '';
+            if (item.permission) {
+                badge = `<span class="badge bg-${item.permission === 'forbidden' ? 'danger' : 'success'} ms-1">${item.permission}</span>`;
+            }
+            ul.innerHTML += `<li class="list-group-item py-1">${item.name} ${badge}</li>`;
+        });
+    }
 
     async function createReplica(type) {
         let nameInput, extraData = {};
@@ -685,6 +722,7 @@
             if (type === 'room') { document.getElementById('roomName').value = ''; document.getElementById('roomFloor').value = '0'; }
             if (type === 'door') document.getElementById('doorName').value = '';
             if (type === 'pet') { document.getElementById('petName').value = ''; document.getElementById('goToDashboardBtn').classList.remove('hidden'); }
+            fetchSetupComponents();
             setTimeout(function() { document.getElementById('setupStatus').innerHTML = ''; }, 3000);
         } catch (err) { alert(err.message); }
     }
@@ -701,7 +739,6 @@
         if (!data || !data.pet) return;
         const pet = data.pet;
         
-        // Aggiorna solo la posizione nella dashboard
         document.getElementById('petNameDisplay').innerText = pet.pet_name;
         document.getElementById('petCurrentRoom').innerText = pet.current_room || 'Outside';
         
@@ -765,13 +802,9 @@
             const pet = res.data.pet;
             
             const stats = pet.daily_buzzer_stats || []; 
-            
-            // INVERTIAMO L'ARRAY: Il backend li invia dal più recente al più vecchio. 
             const reversedStats = [...stats].reverse();
-            
             const dataPoints = reversedStats.length > 0 ? reversedStats : [{ date: new Date().toISOString(), auto_violations_count: pet.auto_violations_count, auto_duration_mins: pet.auto_duration_mins }];
             
-            // Usiamo 'en-GB' per avere il formato GG/MM
             const labels = dataPoints.map(s => new Date(s.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }));
             const violations = dataPoints.map(s => s.auto_violations_count || 0);
             const avgTime = dataPoints.map(s => (s.auto_violations_count > 0 && s.auto_duration_mins > 0) ? (s.auto_duration_mins / s.auto_violations_count).toFixed(2) : 0);
@@ -791,7 +824,6 @@
                 options: { responsive: true, scales: { y: { beginAtZero: true } } }
             });
 
-            // Aggiorniamo le Analytics dentro il modale dei grafici
             const analytics = pet.learning_analytics || {};
             const statusEl = document.getElementById('petLearningStatus');
             let statusText = analytics.learning_status || "Insufficient Data";
@@ -850,11 +882,22 @@
             let extra = item.permission ? '<span class="badge bg-' + (item.permission === 'forbidden' ? 'danger' : 'success') + ' ms-2">' + item.permission + '</span>' : '';
             
             let idHtml = '';
+            let editHtml = '';
             if (type === 'room') {
                 idHtml = `
                     <div class="mt-1">
                         <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="toggleIdVisibility('room-id-${item.id}', this)">Show ID</button>
                         <span id="room-id-${item.id}" class="hidden text-muted text-monospace small ms-2">${item.id}</span>
+                    </div>
+                `;
+                
+                editHtml = `
+                    <div class="input-group input-group-sm ms-2" style="width: auto;">
+                        <select class="form-select form-select-sm" id="perm-select-${item.id}" style="max-width: 120px;">
+                            <option value="allowed" ${item.permission === 'allowed' ? 'selected' : ''}>Allowed</option>
+                            <option value="forbidden" ${item.permission === 'forbidden' ? 'selected' : ''}>Forbidden</option>
+                        </select>
+                        <button class="btn btn-outline-primary" onclick="updateRoomPermission('${item.id}')"><i class="bi bi-check-lg"></i></button>
                     </div>
                 `;
             }
@@ -865,10 +908,24 @@
                         <span>${item.name} ${extra}</span>
                         ${idHtml}
                     </span>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteReplicaMgmt('${type}', '${item.id}')"><i class="bi bi-trash"></i></button>
+                    <div class="d-flex align-items-center">
+                        ${editHtml}
+                        <button class="btn btn-sm btn-outline-danger ms-2" onclick="deleteReplicaMgmt('${type}', '${item.id}')"><i class="bi bi-trash"></i></button>
+                    </div>
                 </li>
             `;
         });
+    }
+
+    async function updateRoomPermission(roomId) {
+        const newPermission = document.getElementById('perm-select-' + roomId).value;
+        try {
+            await apiCall('/dr/' + currentHomeId + '/replicas/room/' + roomId, 'PUT', { permission_level: newPermission });
+            alert('Room permission updated successfully.');
+            fetchManagementData(); 
+        } catch(err) {
+            alert("Error updating permission: " + err.message);
+        }
     }
 
     function renderMgmtViewers(viewers) {

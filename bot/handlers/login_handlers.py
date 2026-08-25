@@ -176,7 +176,7 @@ async def home_selection_callback(update: Update, context: ContextTypes.DEFAULT_
         # Clean up the temporary context cache
         del context.user_data['pending_login_user_id']
         
-        await query.edit_message_text("Home environment selected successfully! You are now connected to the chosen Digital Twin.")
+        await query.edit_message_text("Home environment selected successfully! You are now connected to the chosen home environment.")
 
 
 async def logout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

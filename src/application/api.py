@@ -351,8 +351,104 @@ def remove_digital_replica(dt_id, dr_type, dr_id):
     except ValueError as ve:
         return jsonify({'error': f'Validation failed: {str(ve)}'}), 404
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Error during deletion: {str(e)}'}), 500        
+        return jsonify({'status': 'error', 'message': f'Error during deletion: {str(e)}'}), 500
 
+
+@dr_api.route('/<dt_id>/replicas/<dr_type>/<dr_id>', methods=['PUT'])
+@jwt_required()
+def update_digital_replica(dt_id, dr_type, dr_id):
+    """
+    Generic endpoint to update any Digital Replica type (room, pet, door, etc.),
+    dynamically resolving field placement (profile/data) and enforcing schema validation via DRFactory.
+    """
+    try:
+        # Dynamically retrieve the correct factory based on the requested replica type
+        factory_key = f'DR_FACTORY_{dr_type.upper()}'
+        dr_factory = current_app.config.get(factory_key)
+        
+        if not dr_factory:
+            return jsonify({'error': f'Unsupported Digital Replica type: {dr_type}'}), 400
+
+        current_user_id = get_jwt_identity()
+        db_service = current_app.config['DB_SERVICE']
+
+        # Authorization check: only the admin can modify components
+        is_admin = db_service.is_home_admin(dt_id, current_user_id)
+        if not is_admin:
+            return jsonify({'error': 'Unauthorized. Only the admin can modify components.'}), 403
+
+        # Validate parent Digital Twin existence
+        dt_exists = current_app.config['DT_FACTORY'].get_dt(dt_id)
+        if not dt_exists:
+            return jsonify({'error': f'Home Environment with ID {dt_id} not found.'}), 404
+
+        # Ensure the replica is linked to this specific Digital Twin
+        dr_linked = any(
+            replica.get("id") == dr_id and replica.get("type") == dr_type 
+            for replica in dt_exists.get("digital_replicas", [])
+        )
+        if not dr_linked:
+            return jsonify({'error': f'The {dr_type.capitalize()} is not linked to this Home.'}), 404
+
+        # Retrieve the current replica state from the database
+        current_dr = db_service.get_dr(dr_type, dr_id)
+        if not current_dr:
+            return jsonify({'error': f'{dr_type.capitalize()} with ID {dr_id} not found.'}), 404
+
+        raw_data = request.get_json() or {}
+        if not raw_data:
+            return jsonify({'error': 'No data provided for update.'}), 400
+
+        # Handle nested or flat payloads dynamically using the DR schema definition
+        updates = {}
+        if "profile" in raw_data or "data" in raw_data or "metadata" in raw_data:
+            # Case A: Client sent an already structured/nested dictionary
+            updates = raw_data
+        else:
+            # Case B: Client sent a flat dictionary - classify keys dynamically via schema
+            schemas = dr_factory.schema.get("schemas", {})
+            profile_fields = schemas.get("common_fields", {}).get("profile", {}).keys()
+            data_fields = schemas.get("entity", {}).get("data", {}).keys()
+
+            updates = {"profile": {}, "data": {}}
+            for key, value in raw_data.items():
+                if key in profile_fields:
+                    updates["profile"][key] = value
+                elif key in data_fields:
+                    updates["data"][key] = value
+                else:
+                    # Fallback to profile by default
+                    updates["profile"][key] = value
+
+            # Strip empty dict sections
+            updates = {k: v for k, v in updates.items() if v}
+
+        if not updates:
+            return jsonify({'error': 'No valid fields provided for update.'}), 400
+
+        # Validate and apply delta mutations using the DRFactory
+        validated_updated_dr = dr_factory.update_dr(dr=current_dr, updates=updates)
+
+        # Build update payload and persist in database
+        update_payload = {
+            "profile": validated_updated_dr.get("profile", {}),
+            "data": validated_updated_dr.get("data", {}),
+            "metadata": validated_updated_dr.get("metadata", {})
+        }
+        db_service.update_dr(dr_type=dr_type, dr_id=dr_id, update_data=update_payload)
+
+        return jsonify({
+            'status': 'success',
+            'message': f'{dr_type.capitalize()} {dr_id} updated successfully.',
+            'data': validated_updated_dr
+        }), 200
+
+    except ValueError as ve:
+        return jsonify({'error': f'Validation failed: {str(ve)}'}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error during update: {str(e)}'}), 500
+        
+    
 
 # ----------------- CAMERA DEVICE AUTHENTICATION -------------------
 @dr_api.route('/<dr_id>/tokens', methods=['POST'])
@@ -721,6 +817,7 @@ def get_pet_statistics(dt_id):
                     "pet_id": replica.get("id"),
                     "pet_name": pet_name,
                     "current_room": pet_data.get("current_room", ""),
+                    "buzzer_state": pet_data.get("buzzer_state", ""),
                     "buzzer_status": pet_data.get("buzzer_status", ""),
                     "is_buzzer_active_now": bool(last_buzzer_start),
                     "daily_buzzer_stats": daily_buzzer_stats,

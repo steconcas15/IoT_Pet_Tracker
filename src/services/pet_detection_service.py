@@ -244,7 +244,12 @@ class PetDetectionService(BaseService):
         if permission_level == "forbidden":
             if not last_buzzer_start:
                 db_service.update_dr("pet", search_pet_id, {
-                    "data.last_buzzer_start_time": datetime.now(timezone.utc)
+                    "data.last_buzzer_start_time": datetime.now(timezone.utc),
+                    "data.buzzer_state": "ON"
+                })
+            else:
+                db_service.update_dr("pet", search_pet_id, {
+                    "data.buzzer_state": "ON"
                 })
                 
             # 1. Hardware activation via MQTT Broker
@@ -287,7 +292,8 @@ class PetDetectionService(BaseService):
                 })
                 
                 db_service.update_dr("pet", search_pet_id, {
-                    "data.last_buzzer_start_time": None
+                    "data.last_buzzer_start_time": None,
+                    "data.buzzer_state": "OFF"
                 })
             
             if hasattr(current_app, 'mqtt_manager'):

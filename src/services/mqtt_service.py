@@ -37,22 +37,12 @@ class MQTTManager:
     def _on_connect(self, client, userdata, flags, rc):
         """
         Callback executed upon successful connection to the MQTT broker.
-        Subscribes to global state topics and performs necessary cloud state cleanup.
+        Subscribes to global state topics.
         """
         if rc == 0:
             print("[MQTT] Successfully connected to HiveMQ broker!")
             # Subscribe to all state topics using the single-level wildcard '+'
             client.subscribe("home/+/state")
-            
-            # --- BEGIN CLOUD CLEANUP ---
-            # Injecting the exact ID of the door (ultrasonic sensor) for state reset
-            door_id = "7d0b2bd9-8320-4337-a0c0-f8aedc9f118c"
-            
-            # Publish a "RESET" empty payload with retain=True and qos=1 to overwrite ghost states
-            client.publish(f"home/{door_id}", "", retain=True, qos=1)
-            print(f"[MQTT] Cloud memory successfully cleared for door {door_id}")
-            # --- END CLOUD CLEANUP ---
-            
         else:
             print(f"[MQTT] Connection error. Return code: {rc}")
 

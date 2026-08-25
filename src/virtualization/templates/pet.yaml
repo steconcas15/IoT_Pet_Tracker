@@ -12,6 +12,7 @@ schemas:
   entity:
     data:
       current_room: str
+      buzzer_state: str
       buzzer_status: str
       last_buzzer_start_time: datetime
       daily_buzzer_stats: List[Dict]
@@ -19,6 +20,9 @@ schemas:
 
   validations:
     type_constraints:
+      buzzer_status:
+        type: str
+        enum: ["ON", "OFF"]
       buzzer_status:
         type: str
         enum: ["ONLINE", "OFFLINE", "UNKNOWN"]
@@ -42,6 +46,7 @@ schemas:
     initialization:
       data:
         current_room: ""
+        buzzer_state: "OFF"
         buzzer_status: "UNKNOWN"
         last_buzzer_start_time: null
         daily_buzzer_stats: []
