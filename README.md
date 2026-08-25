@@ -10,7 +10,7 @@ The system allows you to define allowed or forbidden rooms (*allowed* / *forbidd
 
 The overall architecture is divided into **three macro-areas**:
 
-<img width="4216" height="2056" alt="Architettura_overview" src="https://github.com/user-attachments/assets/c17aead6-6dbc-4678-b2ac-4886bc82c7ac" />
+<img width="1384" height="691" alt="image" src="https://github.com/user-attachments/assets/c736fb47-bdad-4026-aab1-78950e608ad0" />
 
 
 ---
