@@ -10,44 +10,8 @@ The system allows you to define allowed or forbidden rooms (*allowed* / *forbidd
 
 The overall architecture is divided into **three macro-areas**:
 
-    ┌─────────────────────────────────────────────────────────────────────────┐
-    │                              CLIENT LAYER                               │
-    │     ┌────────────────────────┐         ┌───────────────────────────┐    │
-    │     │    Web Application     │         │       Telegram BOT        │    │
-    │     │ (Flask REST Dashboard) │         │ (Alerts, 2FA OTP, Locate) │    │
-    │     └───────────┬────────────┘         └─────────────┬─────────────┘    │
-    └─────────────────┼────────────────────────────────────┼──────────────────┘
-                      │ HTTPS (REST API)                   │ HTTPS Webhooks (Ngrok)
-    ┌─────────────────┼────────────────────────────────────┼──────────────────┐
-    │                 ▼                                    ▼                  │
-    │                              SERVER LAYER                               │
-    │     ┌─────────────────────────────────────────────────────────────┐     │
-    │     │                   Flask Backend Orchestrator                │     │
-    │     ├─────────────────────────────────────────────────────────────┤     │
-    │     │ Service Layer:                                              │     │
-    │     │  • Database Service (MongoDB)                               │     │
-    │     │  • MQTT Status Service (LWT Monitoring)                     │     │
-    │     │  • Pet Detection Service (YOLO11 Object Detection)          │     │
-    │     │  • Room Statistics & Pet Statistics Services                │     │
-    │     ├─────────────────────────────────────────────────────────────┤     │
-    │     │ Virtualization Layer (Resource VO Model):                   │     │
-    │     │  • Door DR  • Room DR  • Pet DR  • User Entity              │     │
-    │     └──────────────────────────────┬──────────────────────────────┘     │
-    │                                    │ MQTT (TLS :8883)                   │
-    │                                    ▼                                    │
-    │                              HiveMQ Cloud Broker                        │
-    └────────────────────────────────────┬────────────────────────────────────┘
-                                         │ MQTT (TLS) / HTTP POST
-    ┌────────────────────────────────────┼────────────────────────────────────┐
-    │                                    ▼                                    │
-    │                             ON-FIELD LAYER                              │
-    │  ┌────────────────────┐ ┌──────────────────────┐ ┌───────────────────┐  │
-    │  │ Passage Detection  │ │  Visual Acquisition  │ │Acoustic Deterrence│  │
-    │  │ NodeMCU (ESP8266)  │ │      ESP32-CAM       │ │NodeMCU (ESP8266)  │  │
-    │  │ + HC-SR04 (Ultras.)│ │   + OV2640 Sensor    │ │+ KY-0012 Buzzer   │  │
-    │  │ (Door Gateway)     │ │ (Room Vision Node)   │ │(Wearable Collar)  │  │
-    │  └────────────────────┘ └──────────────────────┘ └───────────────────┘  │
-    └─────────────────────────────────────────────────────────────────────────┘
+<img width="4216" height="2056" alt="Architettura_overview" src="https://github.com/user-attachments/assets/c17aead6-6dbc-4678-b2ac-4886bc82c7ac" />
+
 
 ---
 
