@@ -1,4 +1,4 @@
-# Services
+# IoT Pet Tracker - Services
 
 The services directory implements the core services layer of the Digital Twin system. This layer provides various functionalities that can be attached to Digital Twins to extend their capabilities.
 
