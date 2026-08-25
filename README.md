@@ -96,12 +96,12 @@ The system models entities as atomic and decoupled resources (*Resource VO*):
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/yourusername/pet-tracker-digital-twin.git]
-cd pet-tracker-digital-twin
+git clone https://github.com/yourusername/IoT_Pet_Tracker.git
+cd IoT_Pet_Tracker
 
 # 2. Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
