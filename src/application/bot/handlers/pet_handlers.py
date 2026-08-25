@@ -10,7 +10,7 @@ actuation (buzzer control) while enforcing strict security and authorization pol
 from telegram import Update
 from telegram.ext import ContextTypes
 from datetime import datetime, timezone
-from bot.handlers.login_handlers import LOGGED_USERS
+from src.application.bot.handlers.login_handlers import LOGGED_USERS
 
 async def locate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """

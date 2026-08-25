@@ -8,9 +8,9 @@ Telegram bot interface. It provides foundational commands for user onboarding
 
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes, CommandHandler, MessageHandler, filters
-from bot.handlers.login_handlers import login_handler, logout_handler
-from bot.handlers.pet_handlers import locate_handler, buzzer_handler
-from bot.handlers.login_handlers import home_selection_callback
+from src.application.bot.handlers.login_handlers import login_handler, logout_handler
+from src.application.bot.handlers.pet_handlers import locate_handler, buzzer_handler
+from src.application.bot.handlers.login_handlers import home_selection_callback
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """

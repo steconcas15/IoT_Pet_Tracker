@@ -18,7 +18,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 
 # Import environmental constants from the application settings
-from bot.config.settings import (
+from src.application.bot.config.settings import (
     TELEGRAM_TOKEN, 
     NGROK_TOKEN, 
     SERVER_PORT, 
@@ -40,8 +40,8 @@ from src.services.mqtt_service import MQTTManager
 from vision_model.model import PetDetector
 
 # Telegram Bot Modules
-from bot.routes.webhook_routes import bot_webhook, init_telegram_routes
-from bot.handlers.base_handlers import setup_bot_handlers
+from src.application.bot.routes.webhook_routes import bot_webhook, init_telegram_routes
+from src.application.bot.handlers.base_handlers import setup_bot_handlers
 
 # ==============================================================================
 # 3. SERVER INITIALIZATION & LIFECYCLE MANAGEMENT

@@ -9,8 +9,8 @@ even when triggered by background threads or external MQTT callbacks.
 
 import requests
 from flask import current_app
-from bot.handlers.login_handlers import LOGGED_USERS
-from bot.config.settings import TELEGRAM_TOKEN
+from src.application.bot.handlers.login_handlers import LOGGED_USERS
+from src.application.bot.config.settings import TELEGRAM_TOKEN
 
 # State dictionary to track dispatched offline alerts for future cleanup.
 # Format: home_id -> [(chat_id, message_id), ...]

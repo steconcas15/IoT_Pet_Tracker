@@ -27,7 +27,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # Import datetime and random for handling timestamps and OTP generation
 import random
 from datetime import datetime, timezone, timedelta
-from bot.notifier import send_otp_to_telegram
+from src.application.bot.notifier import send_otp_to_telegram
 
 # Import ObjectId for handling MongoDB document identifiers natively
 from bson import ObjectId
