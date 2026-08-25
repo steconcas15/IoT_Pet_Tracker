@@ -35,6 +35,9 @@ The system models entities as atomic and decoupled resources (*Resource VO*):
 * **Pet DR:** Wearable buzzer status, current room (`current_room`), violation history, and behavioral analytics.
 * **User Entity:** Credentials management, roles (*Admin* for `owned_homes`, *Viewer* for `viewable_homes`), and 2FA tokens (OTP).
 
+<img width="1399" height="678" alt="image" src="https://github.com/user-attachments/assets/fab4bb6e-2670-4962-b523-4701d2af9ae4" />
+
+
 ### 3. Service Layer
 * **Database Service:** Management of MongoDB collections (`digital_twins`, `digital_replicas`, `users`).
 * **MQTT Status Service:** Real-time monitoring via *Last Will and Testament* (LWT) on `home/+/state` with anti-flickering timers (30s disconnection alert, 10s recovery notification).
