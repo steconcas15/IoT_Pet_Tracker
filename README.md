@@ -1,164 +1,126 @@
-# Digital Twin System
+# Pet Tracker - IoT Digital Twin System
 
-A flexible and extensible Digital Twin framework designed to create virtual representations of physical entities. This system provides a comprehensive architecture for building, managing, and interacting with Digital Twins across various domains.
+An IoT system based on **Digital Twin (DT)** architecture for the tracking, real-time monitoring, and behavioral training of pets (dogs and cats) in indoor environments.
+
+The system allows you to define allowed or forbidden rooms (*allowed* / *forbidden*), track movements through a two-step verification mechanism (ultrasonic detection + AI visual verification), and promptly deter the pet using a wearable module with an active buzzer in case of restricted room violations.
+
+---
 
 ## System Architecture
 
-The system is built on a layered architecture that promotes separation of concerns and modularity:
+The overall architecture is divided into **three macro-areas**:
 
-```
-├── Application Layer (Interface & APIs)
-│
-├── Digital Twin Layer (Core Logic)
-│
-├── Services Layer (Business Logic)
-│
-└── Virtualization Layer (Digital Replicas)
-```
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │                              CLIENT LAYER                               │
+    │     ┌────────────────────────┐         ┌───────────────────────────┐    │
+    │     │    Web Application     │         │       Telegram BOT        │    │
+    │     │ (Flask REST Dashboard) │         │ (Alerts, 2FA OTP, Locate) │    │
+    │     └───────────┬────────────┘         └─────────────┬─────────────┘    │
+    └─────────────────┼────────────────────────────────────┼──────────────────┘
+                      │ HTTPS (REST API)                   │ HTTPS Webhooks (Ngrok)
+    ┌─────────────────┼────────────────────────────────────┼──────────────────┐
+    │                 ▼                                    ▼                  │
+    │                              SERVER LAYER                               │
+    │     ┌─────────────────────────────────────────────────────────────┐     │
+    │     │                   Flask Backend Orchestrator                │     │
+    │     ├─────────────────────────────────────────────────────────────┤     │
+    │     │ Service Layer:                                              │     │
+    │     │  • Database Service (MongoDB)                               │     │
+    │     │  • MQTT Status Service (LWT Monitoring)                     │     │
+    │     │  • Pet Detection Service (YOLO11 Object Detection)          │     │
+    │     │  • Room Statistics & Pet Statistics Services                │     │
+    │     ├─────────────────────────────────────────────────────────────┤     │
+    │     │ Virtualization Layer (Resource VO Model):                   │     │
+    │     │  • Door DR  • Room DR  • Pet DR  • User Entity              │     │
+    │     └──────────────────────────────┬──────────────────────────────┘     │
+    │                                    │ MQTT (TLS :8883)                   │
+    │                                    ▼                                    │
+    │                              HiveMQ Cloud Broker                        │
+    └────────────────────────────────────┬────────────────────────────────────┘
+                                         │ MQTT (TLS) / HTTP POST
+    ┌────────────────────────────────────┼────────────────────────────────────┐
+    │                                    ▼                                    │
+    │                             ON-FIELD LAYER                              │
+    │  ┌────────────────────┐ ┌──────────────────────┐ ┌───────────────────┐  │
+    │  │ Passage Detection  │ │  Visual Acquisition  │ │Acoustic Deterrence│  │
+    │  │ NodeMCU (ESP8266)  │ │      ESP32-CAM       │ │NodeMCU (ESP8266)  │  │
+    │  │ + HC-SR04 (Ultras.)│ │   + OV2640 Sensor    │ │+ KY-0012 Buzzer   │  │
+    │  │ (Door Gateway)     │ │ (Room Vision Node)   │ │(Wearable Collar)  │  │
+    │  └────────────────────┘ └──────────────────────┘ └───────────────────┘  │
+    └─────────────────────────────────────────────────────────────────────────┘
 
-### Key Components
+---
 
-1. **Virtualization Layer**
-   - Creates and manages Digital Replicas
-   - Handles schema validation
-   - Manages entity templates
-   - Ensures data consistency
+## Main Components
 
-2. **Services Layer**
-   - Provides data processing capabilities
-   - Implements analytics and monitoring
-   - Handles data persistence
-   - Enables service extensibility
+### 1. On-Field Hardware Nodes
+* **Passage Detection Module (ESP8266 + HC-SR04):**
+  * Differential algorithm to detect passage and avoid false positives.
+  * Sends the trigger event via MQTT to the `home/<door_id>` topic.
+* **Visual Acquisition Module (ESP32-CAM OV2640):**
+  * Listens on the room's MQTT topics.
+  * Upon receiving a trigger event, it captures a frame (using the LED flash if necessary) and sends it to the backend via a JWT-authenticated `HTTP POST multipart/form-data`.
+* **Acoustic Deterrence Module (ESP8266 + KY-0012 Active Buzzer):**
+  * Battery-powered wearable module (collar/harness).
+  * Receives commands on the MQTT topic `home/sound` (`ON`/`OFF`) automatically (in case of a violation) or manually from the administrator.
 
-3. **Digital Twin Layer**
-   - Manages Digital Twin lifecycle
-   - Orchestrates services
-   - Coordinates data flow
+### 2. Digital Twin & Virtualization Layer (Resource VO Model)
+The system models entities as atomic and decoupled resources (*Resource VO*):
+* **Door DR:** Monitors the connection status of the ultrasonic sensor and decouples physical passage from visual capture.
+* **Room DR:** Camera status, permissions (`allowed`/`forbidden`), occupancy status (`occupied`/`empty`), and daily dwell metrics.
+* **Pet DR:** Wearable buzzer status, current room (`current_room`), violation history, and behavioral analytics.
+* **User Entity:** Credentials management, roles (*Admin* for `owned_homes`, *Viewer* for `viewable_homes`), and 2FA tokens (OTP).
 
-4. **Application Layer**
-   - Exposes REST APIs
-   - Provides visualization tools
-   - Manages user interactions
-   - Handles external integrations
+### 3. Service Layer
+* **Database Service:** Management of MongoDB collections (`digital_twins`, `digital_replicas`, `users`).
+* **MQTT Status Service:** Real-time monitoring via *Last Will and Testament* (LWT) on `home/+/state` with anti-flickering timers (30s disconnection alert, 10s recovery notification).
+* **Pet Detection Service:** AI inference via the **YOLO11** model to distinguish the pet from people or robot vacuums and execute the room transition.
+* **Room & Pet Statistics Services:** Aggregation of room dwell times and calculation of the pet's learning/obedience trends (*Learning*, *Trained*, *Regressing*, *Stationary*).
+
+### 4. Client Interfaces
+* **Web Application:** Management dashboard protected by JWT/2FA for layout configuration (rooms, doors), permissions, statistical charts, and role management (*Admin* / *Viewer*).
+* **Telegram BOT:** Immediate push notifications for intrusions and disconnections, OTP code reception, location queries (`/locate`), and manual buzzer activation (`/buzzer`).
+
+---
 
 ## Getting Started
 
 ### Prerequisites
-- Python 3.8+
-- Pymongo 4.10+
-- pyYAML 6.0+
+* **Python 3.8+**
+* **MongoDB Community / Atlas**
+* **HiveMQ Cloud Account** (or any MQTT broker with TLS support on port 8883)
+* **Ngrok** (to expose the Telegram Bot webhook)
+* **Arduino IDE / ESP-IDF** (for flashing the NodeMCU and ESP32-CAM nodes)
 
 ### Environment Setup
+
 ```bash
-# Create and activate virtual environment
+# 1. Clone the repository
+git clone [https://github.com/yourusername/pet-tracker-digital-twin.git]
+cd pet-tracker-digital-twin
+
+# 2. Create and activate a virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-
-### Installation and Configuration
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/digital-twin-system.git
-
-# Install dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
-
-# Configure Database
-# Create a config/database.yaml file:
-
-```yaml
-database:
-  connection:
-    host: "localhost"
-    port: 27017
-    username: ""  # Optional: for authenticated connections
-    password: ""  # Optional: for authenticated connections
-  settings:
-    name: "digital_twin_db"  # Your database name
-    auth_source: "admin"     # Optional: authentication database
-```
-### Basic Usage
 ```
 
-1. **Define Your Entity Template**
-```yaml
-# templates/my_entity.yaml
-type: entity
-properties:
-  required:
-    - name
-    - description
-  optional:
-    - location
-    - status
-measurements:
-  - name: temperature
-    type: float
-    unit: celsius
-  - name: humidity
-    type: float
-    unit: percentage
-```
+## Telegram BOT Commands
 
-2. **Create a Digital Twin**
-```python
-from src.digital_twin.core import DigitalTwin
-from src.services.analytics import AnalyticsService
+* `/start` - Start the bot and display the onboarding menu.
+* `/login <username> <password>` - Link your account and select the environment to manage (the password is automatically deleted from the chat).
+* `/locate` - Real-time query of the room where the pet is currently located.
+* `/buzzer` - Manually activate/deactivate the acoustic signal on the collar (function reserved for the Admin; disabled if the pet is already in a forbidden room).
+* `/logout` - Terminate the active session.
+* `/help` - Command guide.
 
-# Initialize Digital Twin
-dt = DigitalTwin()
+---
 
-# Add services
-analytics = AnalyticsService()
-dt.add_service(analytics)
+## Authors & Credits
+Project for the **Internet of Things (IoT)** class - Academic Year 2025/2026  
+*MSc Electronic Engineering - University of Cagliari (Università degli Studi di Cagliari)*  
 
-# Create Digital Replica
-dr_data = {
-    "name": "Entity-001",
-    "description": "My first entity",
-    "measurements": []
-}
-dt.create_digital_replica("my_entity", dr_data)
-```
-
-3. **Run the Application**
-```bash
-python app.py
-```
-
-## API Endpoints
-
-The system exposes RESTful APIs for Digital Twin management:
-
-```
-POST   /api/dt          # Create Digital Twin
-GET    /api/dt/{id}     # Get Digital Twin
-POST   /api/dr          # Create Digital Replica
-GET    /api/dr/{id}     # Get Digital Replica
-```
-
-## Extending the System
-
-### Adding New Services
-
-1. Create a new service class:
-```python
-from src.services.base import BaseService
-
-class MyService(BaseService):
-    def execute(self, data):
-        # Implement service logic
-        pass
-```
-
-2. Register the service:
-```python
-dt.add_service(MyService())
-```
-
-### Creating Custom Entity Types
-
-1. Define schema in YAML format
-2. Register schema with SchemaRegistry
-3. Use template for Digital Replica creation
-
+* **Marco Fois**
+* **Stefano Concas**
