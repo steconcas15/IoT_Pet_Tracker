@@ -1,4 +1,4 @@
-# Digital Twin
+# IoT Pet Tracker - Digital Twin
 
 This directory contains the core implementation of the Digital Twin system. It provides the fundamental infrastructure for creating, managing, and orchestrating Digital Twins.
 
