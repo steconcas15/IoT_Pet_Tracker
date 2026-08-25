@@ -1,4 +1,4 @@
-# Virtualization
+# IoT Pet Tracker - Virtualization
 
 This directory manages the virtualization layer of the Digital Twin system, providing the foundation for creating and managing digital representations of physical entities.
 
@@ -14,7 +14,7 @@ virtualization/
 
 The virtualization layer is responsible for creating and managing Digital Replicas (DRs), which are virtual representations of physical entities. This layer ensures that the digital representations accurately reflect their physical counterparts and maintain data consistency.
 
-### 📁 digital_replica/
+### digital_replica/
 
 This subdirectory contains the core implementation for creating and managing Digital Replicas. It handles:
 
@@ -23,7 +23,7 @@ This subdirectory contains the core implementation for creating and managing Dig
 - Management of Digital Replica lifecycles
 - Data structure consistency
 
-### 📁 templates/
+### templates/
 
 Contains schema definitions that define the structure and validation rules for different types of Digital Replicas. The templates:
 
