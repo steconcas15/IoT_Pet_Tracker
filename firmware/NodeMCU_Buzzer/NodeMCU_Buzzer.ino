@@ -3,17 +3,17 @@
 #include <MQTT.h>             // Replaced PubSubClient to support QoS 1 publishing
 
 // --- WIFI CONFIGURATION ---
-const char *ssid = "FASTWEB-3QH6KF";
-const char *password = "E2XT6XK6JG";
+const char *ssid = "SSID_WIFI";
+const char *password = "PASSWORD_WIFI";
 
 // --- DIGITAL TWIN IDENTIFIERS ---
-const char* pet_id = "8feecdf5-8aec-4720-9196-6d1d9189c502";
+const char* pet_id = "PUT YOUR PET ID AFTER THE CREATION ON WEB APP";
 
 // --- HIVEMQ CLOUD COORDINATES (PRIVATE) ---
-const char* mqtt_server = "f91c2f750c5d4d2c9ff2177772a4ea75.s1.eu.hivemq.cloud";
-const int mqtt_port = 8883;
-const char* mqtt_user = "PetTracker";
-const char* mqtt_password = "PetTracker26";
+const char* mqtt_server = "MQTT SERVER ADDRESS"; 
+const int mqtt_port = 8883; 
+const char* mqtt_user = "MQTT USERNAME";
+const char* mqtt_password = "MQTT PASSWORD";
 
 // --- MQTT TOPICS ---
 const char* topic_sub_buzzer = "home/sound";

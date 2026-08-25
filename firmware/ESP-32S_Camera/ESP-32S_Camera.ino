@@ -20,19 +20,19 @@
 #include "board_config.h"
 
 // --- WIFI CONFIGURATION ---
-const char *ssid = "FASTWEB-3QH6KF";
-const char *password = "E2XT6XK6JG";
+const char *ssid = "SSID_WIFI";
+const char *password = "PASSWORD_WIFI";
 
 // --- DIGITAL TWIN IDENTIFIERS ---
-const char* home_id = "6a6b0e2a73e73970ad552f46"; 
-const char* room_id = "507c3299-4a89-4ed5-9cdf-5bb4998b25df"; 
-const char* door_id = "7d0b2bd9-8320-4337-a0c0-f8aedc9f118c";
+const char* home_id = "PUT YOUR HOME ID AFTER THE CREATION ON WEB APP"; 
+const char* room_id = "PUT YOUR ROOM ID AFTER THE CREATION ON WEB APP"; 
+const char* door_id = "PUT YOUR DOOR ID AFTER THE CREATION ON WEB APP";
 
 // --- HIVEMQ CLOUD COORDINATES (PRIVATE) ---
-const char* mqtt_server = "f91c2f750c5d4d2c9ff2177772a4ea75.s1.eu.hivemq.cloud"; 
+const char* mqtt_server = "MQTT SERVER ADDRESS"; 
 const int mqtt_port = 8883; 
-const char* mqtt_user = "PetTracker";
-const char* mqtt_password = "PetTracker26";
+const char* mqtt_user = "MQTT USERNAME";
+const char* mqtt_password = "MQTT PASSWORD";
 
 // --- MQTT TOPICS ---
 // LWT status topic dynamically generated using the unique room_id
@@ -41,7 +41,7 @@ String topic_lwt_status  = String("home/") + room_id + "/state";
 String topic_sub_trigger = String("home/") + door_id; 
 
 // --- HTTP SERVER CONFIGURATION ---
-const char* server_ip = "192.168.1.64"; 
+const char* server_ip = "FLASK SERVER IP ADDRESS"; 
 const int server_port = 5000; 
 
 // --- GLOBAL VARIABLES ---
